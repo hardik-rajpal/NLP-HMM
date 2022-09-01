@@ -3,6 +3,7 @@ import numpy as np
 from nltk.corpus import brown
 sentences = [sent for sent in brown.tagged_sents()[0:2]]
 
+
 # Tm = (ij) -> transition from state s_i to s_j
 # Em = (ij) -> observing o_j from s_i state
 # pi = (i) -> initial probab that x1 = s_i
@@ -27,7 +28,7 @@ def viterbi(O, S, pi, Y, A, B):
     T1[:, 0] = inter
 
     for obs in range(1, N):
-        B_factor = B[:, int(Y[obs])].reshape(K,1).T
+        B_factor = B[:, int(Y[obs])].reshape(1,K)
         B_matrix_factor = np.tile(B_factor, (K,1))
     
         A_factor = A * B_matrix_factor
@@ -42,11 +43,10 @@ def viterbi(O, S, pi, Y, A, B):
     for obs in range(N-2, -1, -1):
         best_path.append(S[point])
         point = int(T2[point, obs])
+
     return best_path
 
 viterbi(O, S, pi, Y, A, B)
-
-
 
     # for state in range(K):
     #     T1[state, 0] = pi[state] * B[state, Y[0]]
