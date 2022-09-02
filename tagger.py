@@ -274,70 +274,68 @@ class Tagger:
         self.emmis = np.load("emmis.npy")
         self.trellis = np.load("trellis.npy")
         self.init_prob = np.load("init_prob.npy")
-    
-    def viterbi(self, Y):
+    def dptable(self, V):
         
+        yield " ".join(("%12d" % i) for i in range(len(V)))
+        for state in V[0]:
+            yield "%.7s: " % state + " ".join("%.7s" % ("%f" % v[state]["prob"]) for v in V)
+    def viterbi(self, Y):#(observations, states, start_p, trans_p, emit_p)
+
         K = len(self.tags)
-        N = len(self.words)
-        N_curr = len(Y)
+        states = np.arange(len(self.tags))
+        observations = np.asarray(Y)
 
-        pi = self.init_prob.reshape((K))
-
-        A = self.trellis * (1 / np.tile(np.sum(self.trellis, 1).reshape((K, 1)), (1, len(self.tags))))
-        A = A.reshape((K,K))
+        trans_p = self.trellis * (1 / np.tile(np.sum(self.trellis, 1).reshape((K, 1)), (1, len(self.tags))))
 
         B = self.emmis * (1 / np.tile(np.sum(self.emmis, 0), (len(self.words), 1)))
-        B = B.T
-        B = B.reshape((K,N))
-        
-        S = self.tags.reshape((K,1))
-        
-        Y = np.asarray(Y).reshape((N_curr))
-        
-        # for i in range(len(self.words)):
-        #     for j in range(len(self.tags)):
-        #         B[i,j] = self.emmis[i,j]/np.sum(self.emmis[:,j])
+        emit_p = B.T
+        start_p = self.init_prob
 
-        T1 = np.zeros((K, N_curr))
-        T2 = np.zeros((K, N_curr))
+        V = [{}]
+        for st in states:
+            V[0][st] = {"prob": start_p[st] * emit_p[st][observations[0]], "prev": None}
+   
+        for t in range(1, len(observations)):
+            V.append({})
+            for st in states:
+                max_tr_prob = V[t - 1][states[0]]["prob"] * trans_p[states[0]][st]
+                prev_st_selected = states[0]
+                for prev_st in states[1:]:
+                    tr_prob = V[t - 1][prev_st]["prob"] * trans_p[prev_st][st]
+                    if tr_prob > max_tr_prob:
+                        max_tr_prob = tr_prob
+                        prev_st_selected = prev_st
+    
+                max_prob = max_tr_prob * emit_p[st][observations[t]]
+                V[t][st] = {"prob": max_prob, "prev": prev_st_selected}
+    
+        opt = []
+        max_prob = 0.0
+        best_st = None
+    
+        for st, data in V[-1].items():
+            if data["prob"] > max_prob:
+                max_prob = data["prob"]
+                best_st = st
+        opt.append(best_st)
+        previous = best_st
+    
+    
+        for t in range(len(V) - 2, -1, -1):
+            print(previous)
+            opt.insert(0, V[t + 1][previous]["prev"])
+            previous = V[t + 1][previous]["prev"]
 
-        T1[:, 0] = pi * B[:, int(Y[0])]
-        print(Y[0])
-        np.savetxt('pi.txt',pi)
-        np.savetxt('B.csv',B[:,int(Y[0])], delimiter=', ')
-        np.savetxt('T1.csv',T1[:,0],delimiter=', ')
-        # exit()
-        for obs in range(1, N_curr):
-
-            # B_factor[0, i] represents the probabilty P(word_i | state)
-            B_factor = B[:, int(Y[obs])].reshape(1,K)
-
-            # B_matrix_factor is row wise repetiton of B_factor
-            B_matrix_factor = np.tile(B_factor, (K,1))
-        
-            # A_factor = A P( s_j | s_i) * P(word | s_j)
-            A_factor = A * B_matrix_factor
-
-            temp = np.tile(T1[:, obs-1].reshape(-1, 1), (1, K))
-            # final = P( prev ending s_i) * P(s_j | s_i) * P(word| s_j)
-            final = temp * A_factor
-        
-            T1[:, obs] = np.max(final, 1)
-            T2[:, obs] = np.argmax(final, 1)
-        
-        point = np.argmax(T1[:, N_curr-1])
-        best_path = []
-
-        for obs in range(N_curr-2, -1, -1):
-            best_path.append(S[point].item())
-            point = int(T2[point, obs])
-
-        return best_path
+        print ("The steps of states are " + " ".join(self.tags[opt]) + " with highest probability of %s" % max_prob)
+        for i in range(len(opt)):
+            opt[i] = self.tags[opt[i]]
+        return opt
+ 
 if __name__=='__main__':
     tagger = Tagger()
     sents = list(brown.tagged_sents())
     train = sents[:2000]
-    test = sents[2000:2010]
+    test = sents[2000:2002]
     testSents = list(map(
                     lambda sent:list(map(lambda wt:wt[0],sent)),
                     test
