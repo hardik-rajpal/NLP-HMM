@@ -131,6 +131,17 @@ class Tagger:
 
         """
         return self.emmis[wi,ti]/np.sum(self.emmis[:,ti])    
+    def evalMetrics(self,preds,trueTags):
+        numtags = len(self.tags)
+        confmat = np.zeros((numtags,numtags))
+        total = len(preds)
+
+        for pred,trueTag in zip(preds,trueTags):
+            confmat[pred,trueTag]+=1
+        accuracy = np.sum(np.array([confmat[i,i] for i in range(numtags)]))/total
+        perPOS_acc = [confmat[i,i]/(max(1,np.sum(confmat[:,i]))) for i in np.arange(numtags)]
+        return confmat,accuracy,perPOS_acc
+    
     def findTagSequence(self,sentence):
         """Should return the given sentence with pos tags attached to each word/punctuation.
 
@@ -154,6 +165,11 @@ class Tagger:
             for i in range(K):
                 T1[i,j] = self.emmissionProbability(i,self.wordinds[words[j]])*np.max(np.vectorize(lambda k:T1[k,j-1]*self.transmissionProbability(k,j))(np.arange(K)))
                 T2[i,j] = np.argmax(np.vectorize(lambda k:T1[k,j-1]*self.transmissionProbability(k,i))(np.arange(K)))*self.emmissionProbability(i,self.wordinds[words[j]])
+    def trainOn(self, trainSents):
+        self.initializeTrellisAndEmmis()
+        self.updateTrellisAndEmmis(trainSents)
+    def testOn(self, testSents):
+        
     def sentencesFromCorpus(self):
 
         train_size = self.train_size
