@@ -1,6 +1,7 @@
 from typing import Tuple
 import numpy as np
 import nltk
+import re
 from nltk.corpus import brown
 class Tagger:
     tags = []#list of tags
@@ -10,6 +11,8 @@ class Tagger:
     taginds = {}#dictionary mapping tags to indices in tags.
     init_prob = []
     train_size = 2000
+    isAmount = lambda word:(re.compile('\W[\d,.]+').match(word)!=None)
+    isQualNum = lambda word:(re.compile('[\d\w,-/]*\d[\d\w,-/]*').match(word)!=None)
     # trellis#transition probabilities size = len(tags)+2 (for . and ^)
     # emmis#Emission probabilities. emmis[i][j] = P(word[i]|tag i in tags field)
     #-1=>'^'
@@ -170,15 +173,31 @@ class Tagger:
         self.updateTrellisAndEmmis(trainSents)
     def testOn(self, testSents):
         
+    def preProcSents(self,sents):
+        # qualtags = []
+        for i in range(len(sents)):
+            for j in range(len(sents[i])):
+                word = list(sents[i][j])
+                if(Tagger.isAmount(word[0])):
+                    word[0] = '$amt$'
+                if(Tagger.isQualNum(word[0])):
+                    word[0] = f'${word[1]}$'
+                    # qualtags.append(word[1])
+                sents[i][j] = word
+        # qt,c = np.unique(np.array(qualtags),return_counts=True)
+        # np.savetxt('qualtags.csv',qt,fmt="%s")
+        # np.savetxt('counttags.csv',c,fmt="%d")
+        return sents
     def sentencesFromCorpus(self):
-
         train_size = self.train_size
         corpus = brown.tagged_sents()[:train_size]
         sentences = [sent for sent in corpus]
         
         tagged_words = []
+        sentences = self.preProcSents(sentences)
         for sent in sentences:
             for word in sent:
+                
                 tagged_words.append(word)
         tagged_words = np.asarray(tagged_words)
         
@@ -188,8 +207,9 @@ class Tagger:
         words_all = list(map(lambda x: x.lower(), words_all))
         # print(f'total words: {len(words_all)}')
         words,counts = np.unique(words_all,return_counts=True)
-        np.savetxt('words.csv',words,fmt="%s")
-        np.savetxt('counts.csv',counts,fmt="%d")
+        # np.savetxt('words.csv',words,fmt="%s")
+        
+        # np.savetxt('counts.csv',counts,fmt="%d")
         
         self.tags = tags
         self.words = words
@@ -201,7 +221,7 @@ class Tagger:
             self.taginds[self.tags[i]] = i
         
         mapped_sentences = [[ [self.wordinds[a.lower()], self.taginds[b]] for a, b in sent] for sent in sentences]
-        print(sentences[0], mapped_sentences[0])
+        # print(sentences[0], mapped_sentences[0])
 
         return mapped_sentences
 
@@ -272,21 +292,21 @@ class Tagger:
             point = int(T2[point, obs])
 
         return best_path
+if __name__=='__main__':
+    tagger = Tagger()
+    sents = tagger.sentencesFromCorpus()
+    # for sent in sents:
+    #     print(list(map(lambda wt:tagger.words[wt[0]],sent)))
+    tagger.initializeTrellisAndEmmis()
+    tagger.updateTrellisAndEmmis(sents)
+    # tagger.saveTagger()
+    # tagger.loadTagger()
+    # sent = tagger.viterbi([6667, 2959, 1884, 3131, 3766])
+    # print(sent)
+    exit()
 
-tagger = Tagger()
-sents = tagger.sentencesFromCorpus()
-# for sent in sents:
-#     print(list(map(lambda wt:tagger.words[wt[0]],sent)))
-tagger.initializeTrellisAndEmmis()
-tagger.updateTrellisAndEmmis(sents)
-# tagger.saveTagger()
-# tagger.loadTagger()
-# sent = tagger.viterbi([6667, 2959, 1884, 3131, 3766])
-# print(sent)
-exit()
 
 
-
-# ###Test:
-testSent = "the fox hunted for the man"
-tagger.findTagSequence(testSent)
+    # ###Test:
+    testSent = "the fox hunted for the man"
+    tagger.findTagSequence(testSent)
