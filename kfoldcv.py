@@ -25,7 +25,7 @@ def kFoldAccuracy(k):
         POStagger = tagger.Tagger()
         POStagger.trainOn(trainSents)
         predTags = POStagger.testOn(testSents)
-        POStagger.getAccuracy(predTags,testTags)
+        res.append(POStagger.getAccuracy(predTags,testTags))
     return res
 if __name__=='__main__':
     kFoldAccuracy(5)
