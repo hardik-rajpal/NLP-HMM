@@ -140,14 +140,14 @@ class Tagger:
             for i in range(K):
                 T1[i,j] = self.emmissionProbability(i,self.wordinds[words[j]])*np.max(np.vectorize(lambda k:T1[k,j-1]*self.transmissionProbability(k,j))(np.arange(K)))
                 T2[i,j] = np.argmax(np.vectorize(lambda k:T1[k,j-1]*self.transmissionProbability(k,i))(np.arange(K)))*self.emmissionProbability(i,self.wordinds[words[j]])
-        
-tagger = Tagger()
-sents = tagger.dummyWordsTags()
-for sent in sents:
-    print(list(map(lambda wt:tagger.words[wt[0]],sent)))
-tagger.initializeTrellisAndEmmis()
-tagger.updateTrellisAndEmmis(sents)
+if __name__=='__main__':        
+    tagger = Tagger()
+    sents = tagger.dummyWordsTags()
+    for sent in sents:
+        print(list(map(lambda wt:tagger.words[wt[0]],sent)))
+    tagger.initializeTrellisAndEmmis()
+    tagger.updateTrellisAndEmmis(sents)
 
-# ###Test:
-testSent = "the fox hunted for the man"
-tagger.findTagSequence(testSent)
+    # ###Test:
+    testSent = "the fox hunted for the man"
+    tagger.findTagSequence(testSent)
