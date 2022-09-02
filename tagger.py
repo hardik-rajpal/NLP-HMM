@@ -118,19 +118,25 @@ class Tagger:
         return self.emmis[wi,ti]/np.sum(self.emmis[:,ti])
     def evalMetrics(self,preds,trueTags):
         #if pred and truetags are sentencewise:
-        flatpreds = []
-        flattruths = []
-        for pred,truth in zip(preds,trueTags):
-            flatpreds.extend(pred)
-            flattruths.extend(truth)
-        preds = flatpreds;trueTags = flattruths        
+        # flatpreds = []
+        # flattruths = []
+        # for pred,truth in zip(preds,trueTags):
+        #     flatpreds.extend(pred)
+        #     flattruths.extend(truth)
+        # preds = flatpreds;trueTags = flattruths        
         #end 
-        confmat = np.zeros((len(self.tags,self.tags)))
+        numtags = len(self.tags)
+        confmat = np.zeros((numtags,numtags))
         total = len(preds)
+        ##if pred and truetags are not integers but strs:
+        # preds = list(map(lambda x:self.taginds[x],preds))
+        # trueTags = list(map(lambda x:self.taginds[x],trueTags))
+        ##end
+        
         for pred,trueTag in zip(preds,trueTags):
-            confmat[self.taginds[pred],self.taginds[trueTag]]+=1
-        accuracy = np.sum(np.array([confmat[i,i] for i in range(total)]))/total
-        perPOS_acc = [confmat[i,i]/(max(1,np.sum(confmat[:,i]))) for i in np.arange(total)]
+            confmat[pred,trueTag]+=1
+        accuracy = np.sum(np.array([confmat[i,i] for i in range(numtags)]))/total
+        perPOS_acc = [confmat[i,i]/(max(1,np.sum(confmat[:,i]))) for i in np.arange(numtags)]
         return confmat,accuracy,perPOS_acc
     def findTagSequence(self,sentence:str)->str:
         """Should return the given sentence with pos tags attached to each word/punctuation.
