@@ -2,7 +2,7 @@ from typing import List, Tuple
 import tagger
 import numpy as np
 from nltk.corpus import brown
-def kFoldAccuracy(k):
+def findEvalMetrics(k):
     sents = list(brown.tagged_sents())
     l = len(sents)
     perm = np.random.permutation(l)
@@ -25,7 +25,11 @@ def kFoldAccuracy(k):
         POStagger = tagger.Tagger()
         POStagger.trainOn(trainSents)
         predTags = POStagger.testOn(testSents)
-        res.append(POStagger.getAccuracy(predTags,testTags))
+        confmat, acc,pposa = POStagger.evalMetrics(predTags,testTags)
+        np.savetxt(f'confmat_{i+1}.csv',confmat)
+        np.savetxt(f'pposa_{i+1}.csv',confmat)
+        res.append(acc)
+    np.savetxt('accuracy.csv',res)
     return res
 if __name__=='__main__':
-    kFoldAccuracy(5)
+    findEvalMetrics(5)
