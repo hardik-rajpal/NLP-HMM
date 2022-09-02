@@ -1,3 +1,4 @@
+from imghdr import tests
 from typing import Tuple
 import numpy as np
 import nltk
@@ -13,47 +14,6 @@ class Tagger:
     train_size = 2000
     isAmount = lambda word:(re.compile('\W[\d,.]+').match(word)!=None)
     isQualNum = lambda word:(re.compile('[\d\w,-/]*\d[\d\w,-/]*').match(word)!=None)
-    # trellis#transition probabilities size = len(tags)+2 (for . and ^)
-    # emmis#Emission probabilities. emmis[i][j] = P(word[i]|tag i in tags field)
-    #-1=>'^'
-    #-2=>'.'
-    def dummyWordsTags(self):
-        """
-
-        Returns:
-            list[list[str,int]]:  a list of dummy sentences after initializing unique tags and words.
-        """
-        self.tags = ['N','V','A','DT','Adv','P','.','^']
-        self.words = ['the','fox','dances','weirdly','man','hunted','for','.','^']
-        self.taginds = {
-            'N':0,
-            'V':1,
-            'A':2,
-            'DT':3,
-            'Adv':4,
-            'P':5,
-            '.':-2,
-            '^':-1
-        }
-        self.wordinds = {
-            'the':0,
-            'fox':1,
-            'dances':2,
-            'weirdly':3,
-            'man':4,
-            'hunted':5,
-            'for':6,
-            '.':-2,
-            '^':-1
-        }
-        return [
-            [
-                [0,3],[1,0],[2,1],[3,4]
-            ],
-            [
-                [0,3],[4,0],[5,1],[6,5],[0,3],[1,0]
-            ]
-        ]
     def tokenizeTextToSentences(text):
         """Converts supplied text into tokenized sentences.
         ### Also updates tags field in Tagger class with new tags as encountered.
@@ -168,25 +128,56 @@ class Tagger:
             for i in range(K):
                 T1[i,j] = self.emmissionProbability(i,self.wordinds[words[j]])*np.max(np.vectorize(lambda k:T1[k,j-1]*self.transmissionProbability(k,j))(np.arange(K)))
                 T2[i,j] = np.argmax(np.vectorize(lambda k:T1[k,j-1]*self.transmissionProbability(k,i))(np.arange(K)))*self.emmissionProbability(i,self.wordinds[words[j]])
+    
     def trainOn(self, trainSents):
-        self.initializeTrellisAndEmmis()
-        self.updateTrellisAndEmmis(trainSents)
-    def testOn(self, testSents):
+        mapped_sents = self.get_mapped_sentences(trainSents)
         
-    def preProcSents(self,sents):
-        # qualtags = []
-        for i in range(len(sents)):
-            for j in range(len(sents[i])):
-                word = list(sents[i][j])
-                if(Tagger.isAmount(word[0])):
-                    word[0] = '$amt$'
-                if(Tagger.isQualNum(word[0])):
-                    word[0] = f'${word[1]}$'
-                    # qualtags.append(word[1])
-                sents[i][j] = word
-        # qt,c = np.unique(np.array(qualtags),return_counts=True)
-        # np.savetxt('qualtags.csv',qt,fmt="%s")
-        # np.savetxt('counttags.csv',c,fmt="%d")
+        self.initializeTrellisAndEmmis()
+        self.updateTrellisAndEmmis(mapped_sents)
+        np.savetxt('words.txt',self.words,fmt="%s")
+        np.savetxt('tags.txt',self.tags,fmt="%s")
+        np.savetxt('trellis.csv',self.trellis,fmt="%d")
+        np.savetxt('emmis.csv',self.emmis,fmt='%d')
+    
+    def testOn(self, testSents):
+        mapped_sents = self.get_mapped_sentences_test(testSents)
+        answer = []
+        for sent in mapped_sents:
+            best_path = self.viterbi(sent)
+            answer.append(best_path)
+        return answer
+
+    def preProcSents(self,sents, train=True):
+        if train==True:
+            # qualtags = []
+            for i in range(len(sents)):
+                for j in range(len(sents[i])):
+                    word = list(sents[i][j])
+                    word[0] = word[0].lower()
+                    if(Tagger.isAmount(word[0])):
+                        word[0] = '$amt$'
+                    if(Tagger.isQualNum(word[0])):
+                        word[0] = f'$qnw$'
+                        # qualtags.append(word[1])
+                    sents[i][j] = word
+            # qt,c = np.unique(np.array(qualtags),return_counts=True)
+            # np.savetxt('qualtags.csv',qt,fmt="%s")
+            # np.savetxt('counttags.csv',c,fmt="%d")
+        else:
+            # qualtags = []
+            for i in range(len(sents)):
+                for j in range(len(sents[i])):
+                    word = sents[i][j].lower()
+                    if(Tagger.isAmount(word)):
+                        word = '$amt$'
+                    if(Tagger.isQualNum(word)):
+                        word = f'$qnw$'
+                        # qualtags.append(word[1])
+                    if (not self.wordinds.__contains__(word)):
+                        word = '*'
+                    sents[i][j] = word
+            # qt,c = np.unique(np.array(qualtags),return_counts=True)
+            # np.savetxt('qualtags.csv',qt,fmt="%s")
         return sents
     def sentencesFromCorpus(self):
         train_size = self.train_size
@@ -221,6 +212,52 @@ class Tagger:
             self.taginds[self.tags[i]] = i
         
         mapped_sentences = [[ [self.wordinds[a.lower()], self.taginds[b]] for a, b in sent] for sent in sentences]
+        # print(sentences[0], mapped_sentences[0])
+
+        return mapped_sentences
+    def get_mapped_sentences(self, sents):
+        corpus = sents
+        sentences = [sent for sent in corpus]
+        
+        tagged_words = []
+        sentences = self.preProcSents(sentences)
+        for sent in sentences:
+            for word in sent:
+                tagged_words.append(word)
+        tagged_words = np.asarray(tagged_words)
+        
+        tags = np.unique(tagged_words[:,1])
+        
+        words_all = tagged_words[:, 0]
+        words_all = list(map(lambda x: x, words_all))
+        # print(f'total words: {len(words_all)}')
+        words,counts = np.unique(words_all,return_counts=True)
+        # np.savetxt('words.csv',words,fmt="%s")
+        
+        # np.savetxt('counts.csv',counts,fmt="%d")
+        
+        self.tags = tags
+        self.words = words.tolist()
+        self.words.append('*')
+        self.words = np.asarray(self.words)
+        # print(f'words ({len(self.words)}): {self.words} \n tags ({len(self.tags)}): {tags}')
+        for i in range(len(self.words)):
+            self.wordinds[self.words[i]] = i
+        
+        for i in range(len(self.tags)):
+            self.taginds[self.tags[i]] = i
+        
+        mapped_sentences = [[ [self.wordinds[a], self.taginds[b]] for a, b in sent] for sent in sentences]
+        # print(sentences[0], mapped_sentences[0])
+
+        return mapped_sentences
+    def get_mapped_sentences_test(self, sents):
+        corpus = sents
+        sentences = [sent for sent in corpus]
+        
+        sentences = self.preProcSents(sentences, False)
+        #TODO: smoothing function
+        mapped_sentences = [[ self.wordinds[a] for a in sent] for sent in sentences]
         # print(sentences[0], mapped_sentences[0])
 
         return mapped_sentences
@@ -265,7 +302,11 @@ class Tagger:
         T2 = np.zeros((K, N_curr))
 
         T1[:, 0] = pi * B[:, int(Y[0])]
-
+        print(Y[0])
+        np.savetxt('pi.txt',pi)
+        np.savetxt('B.csv',B[:,int(Y[0])], delimiter=', ')
+        np.savetxt('T1.csv',T1[:,0],delimiter=', ')
+        # exit()
         for obs in range(1, N_curr):
 
             # B_factor[0, i] represents the probabilty P(word_i | state)
@@ -294,11 +335,26 @@ class Tagger:
         return best_path
 if __name__=='__main__':
     tagger = Tagger()
-    sents = tagger.sentencesFromCorpus()
+    sents = list(brown.tagged_sents())
+    train = sents[:2000]
+    test = sents[2000:2010]
+    testSents = list(map(
+                    lambda sent:list(map(lambda wt:wt[0],sent)),
+                    test
+                    ))
+    testTags = list(map(
+        lambda sent:list(map(lambda wt:wt[1],sent)),
+        test
+    ))
+    tagger.trainOn(train)
+    preds = tagger.testOn(testSents)
+    evals = []
+    for i in range(len(preds)):
+        # print()
+        evals.append(list(zip(testSents[i],preds[i],test[i])))
+    np.savetxt('evals.txt',np.asarray(evals),fmt="%s")
     # for sent in sents:
     #     print(list(map(lambda wt:tagger.words[wt[0]],sent)))
-    tagger.initializeTrellisAndEmmis()
-    tagger.updateTrellisAndEmmis(sents)
     # tagger.saveTagger()
     # tagger.loadTagger()
     # sent = tagger.viterbi([6667, 2959, 1884, 3131, 3766])
