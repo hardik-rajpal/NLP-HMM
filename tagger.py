@@ -248,24 +248,24 @@ class Tagger:
 
         V = [{}]
         for st in states:
-            V[0][st] = {"prob": pi[st] * emit_p[st][observations[0]], "prev": None}
+            V[0][st] = {"prob": np.math.log10(pi[st] * emit_p[st][observations[0]]), "prev": None}
    
         for t in range(1, len(observations)):
             V.append({})
             for st in states:
-                max_tr_prob = V[t - 1][states[0]]["prob"] * trans_p[states[0]][st]
+                max_tr_prob = V[t - 1][states[0]]["prob"] + np.math.log10(trans_p[states[0]][st])
                 prev_st_selected = states[0]
                 for prev_st in states[1:]:
-                    tr_prob = V[t - 1][prev_st]["prob"] * trans_p[prev_st][st]
+                    tr_prob = V[t - 1][prev_st]["prob"] + np.math.log10(trans_p[prev_st][st])
                     if tr_prob > max_tr_prob:
                         max_tr_prob = tr_prob
                         prev_st_selected = prev_st
     
-                max_prob = max_tr_prob * emit_p[st][observations[t]]
-                V[t][st] = {"prob": max_prob*100, "prev": prev_st_selected}
+                max_prob = max_tr_prob + np.math.log10(emit_p[st][observations[t]])
+                V[t][st] = {"prob": max_prob, "prev": prev_st_selected}
     
         opt = []
-        max_prob = 0.0
+        max_prob = -1000
         best_st = None
     
         for st, data in V[-1].items():
