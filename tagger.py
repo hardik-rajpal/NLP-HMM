@@ -290,7 +290,11 @@ class Tagger:
         
         return opt
     def demoSent(self,sent):
-        return self.testOn([sent.split(' ')])[0]
+        sent2 = sent[:].split(' ')
+        tags = self.testOn([sent.split(' ')])[0]
+        for i in range(len(tags)):
+            sent2[i]+= '_'+tags[i]
+        return ' '.join(sent2)
 def findEvalMetrics(k):
     sents = list(brown.tagged_sents(tagset="universal"))
     l = len(sents)
