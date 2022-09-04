@@ -114,8 +114,14 @@ class Tagger:
             trueTag = self.taginds[trueTag]
             confmat[pred,trueTag]+=1
         accuracy = np.sum(np.array([confmat[i,i] for i in range(numtags)]))/total
-        perPOS_acc = [confmat[i,i]/(max(1,np.sum(confmat[:,i]))) for i in np.arange(numtags)]
-        return confmat,accuracy,perPOS_acc
+        ppos = []
+        pposr = [confmat[i,i]/(max(1,np.sum(confmat[:,i]))) for i in np.arange(numtags)]
+        pposp = [confmat[i,i]/(max(1,np.sum(confmat[i,:]))) for i in np.arange(numtags)]
+        pposf1 = [((2*pposp[i]*pposr[i])/((pposp[i])+(pposr[i]))) for i in np.arange(numtags)]
+        ppos.append(pposp)
+        ppos.append(pposr)
+        ppos.append(pposf1)
+        return confmat,accuracy,np.array(ppos)
     def trainOn(self, trainSents):
         mapped_sents,leastFreqWords = self.get_mapped_sentences(trainSents)
         
@@ -181,7 +187,7 @@ class Tagger:
         words_all = list(map(lambda x: x, words_all))
         # print(f'total words: {len(words_all)}')
         words,counts = np.unique(words_all,return_counts=True)
-        # np.savetxt('words.csv',words,fmt="%s")
+        np.savetxt('words.csv',words,fmt="%s")
         freqThres = 2
         for i in range(len(counts)):
             self.freqMap[words[i]] = counts[i]
@@ -208,18 +214,16 @@ class Tagger:
     def get_mapped_sentences_test(self, sents):
         corpus = sents
         sentences = [sent for sent in corpus]
-        
         sentences = self.preProcSents(sentences, False)
-        #TODO: smoothing function
         mapped_sentences = [[ self.wordinds[a] for a in sent] for sent in sentences]
-        # print(sentences[0], mapped_sentences[0])
-
         return mapped_sentences
 
     def saveTagger(self):
         np.save("emmis", self.emmis)
         np.save("trellis", self.trellis)
         np.save("init_prob", self.init_prob)
+        np.savetxt("words",self.words,fmt="%s")
+        np.savetxt("")
     def loadTagger(self):
         #TODO: rewrite this part
         tagged_words = np.asarray(brown.tagged_words())
@@ -276,7 +280,6 @@ class Tagger:
         previous = best_st
 
         if previous is None:
-            # TODO: handle this case:
             print("Probability is 0")
             return []
     
@@ -298,6 +301,7 @@ def findEvalMetrics(k):
     # print(sents[0])
     res = []
     now = time()
+    allitersppos = []
     for i in range(k):
         p1 = sents[:int((i*l)/k)]
         p2 = sents[int((i+1)*l/k):]
@@ -320,46 +324,18 @@ def findEvalMetrics(k):
         predTags = POStagger.testOn(testSentsOnlyWords)
         
         confmat, acc, pposa = POStagger.evalMetrics(predTags,testSentsOnlyTags)
+        allitersppos.append(pposa)
         np.savetxt(f'confmat_{i+1}.csv',confmat,delimiter=', ')
         np.savetxt(f'pposa_{i+1}.csv',pposa,delimiter=', ')
         plt.imshow(confmat,cmap='hot',interpolation='nearest')
+        plt.xticks(np.arange(12),labels=POStagger.tags,fontsize=8)
+        plt.yticks(np.arange(12),labels=POStagger.tags,fontsize=8)
         plt.savefig(f'confmat_{i+1}.png')
         res.append(acc)
-        print(f'Time for iteration: {i+1}: {time() - now}')
+        print(f'Time for iteration {i+1}: {time() - now}')
         now = time()
-        #TODO remove break below 
-        # break
+    np.savetxt('perposmetrics.csv',np.mean(allitersppos,0))
     np.savetxt('accuracy.csv',res)
     return res
 if __name__=='__main__':
-    # tagger = Tagger()
-    # sents = list(brown.tagged_sents(tagset='universal'))
-    # train = sents[:2000]
-    # test = sents[2000:2002]
-    # testSents = list(map(
-    #                 lambda sent:list(map(lambda wt:wt[0],sent)),
-    #                 test
-    #                 ))
-    # testTags = list(map(
-    #     lambda sent:list(map(lambda wt:wt[1],sent)),
-    #     test
-    # ))
-    # tagger.trainOn(train)
-    # preds = tagger.testOn(testSents)
-    # evals = []
-    # for i in range(len(preds)):
-    #     # print()
-    #     evals.append(list(zip(testSents[i],preds[i],test[i])))
-    # np.savetxt('evals.txt',np.asarray(evals),fmt="%s")
-    # # for sent in sents:
-    # #     print(list(map(lambda wt:tagger.words[wt[0]],sent)))
-    # # tagger.saveTagger()
-    # # tagger.loadTagger()
-    # # sent = tagger.viterbi([6667, 2959, 1884, 3131, 3766])
-    # # print(sent)
-    # exit()
     findEvalMetrics(5)
-
-
-    # ###Test:
-    # testSent = "the fox hunted for the man"
