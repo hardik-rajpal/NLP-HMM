@@ -222,13 +222,9 @@ class Tagger:
         np.save("emmis", self.emmis)
         np.save("trellis", self.trellis)
         np.save("init_prob", self.init_prob)
-        np.savetxt("words",self.words,fmt="%s")
-        np.savetxt("")
+        np.savetxt("words.txt",self.words,fmt="%s")
+        np.savetxt("tags.txt",self.tags,fmt="%s")
     def loadTagger(self):
-        #TODO: rewrite this part
-        tagged_words = np.asarray(brown.tagged_words())
-        self.tags = np.unique(tagged_words[:,1])
-        self.words = np.unique(tagged_words[:,0])
         self.emmis = np.load("emmis.npy")
         self.trellis = np.load("trellis.npy")
         self.init_prob = np.load("init_prob.npy")
@@ -293,6 +289,8 @@ class Tagger:
             opt[i] = self.tags[opt[i]]
         
         return opt
+    def demoSent(self,sent):
+        return self.testOn([sent.split(' ')])[0]
 def findEvalMetrics(k):
     sents = list(brown.tagged_sents(tagset="universal"))
     l = len(sents)
@@ -337,5 +335,15 @@ def findEvalMetrics(k):
     np.savetxt('perposmetrics.csv',np.mean(allitersppos,0))
     np.savetxt('accuracy.csv',res)
     return res
+def getTrainedModel():
+    sents = list(brown.tagged_sents(tagset="universal"))
+    l = len(sents)
+    perm = np.random.permutation(l)
+    sents = np.asanyarray(sents,dtype=object)[perm].tolist()
+    tagger = Tagger()
+    tagger.trainOn(sents[:int(4*l/5)])
+    return tagger
 if __name__=='__main__':
     findEvalMetrics(5)
+
+    # tagger.saveTagger()
