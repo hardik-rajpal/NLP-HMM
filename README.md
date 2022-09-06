@@ -7,7 +7,8 @@ python (3.10 used) packages required:
     nltk (and brown corpus downloaded, otherwise follow instructions in error message.)
 
 Notes:
-1. Every time the tagger is trained, it gets saved into txt and npy files locally. We can then use the loadTagger() function next time to avoid spending time on training.
+1. Every time the tagger is trained, it gets saved into txt and npy files locally.
+We can then use the loadTagger() function next time to avoid spending time on training.
 2. To test a particular sentence on the tagger:
-t = getTrainedModel() #function defined in tagger.py
+t = Tagger.getTrainedModel()
 t.demoSent('The boy jumped over the wall.')

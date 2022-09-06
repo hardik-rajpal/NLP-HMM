@@ -13,33 +13,10 @@ class Tagger:
         self.taginds = {}#dictionary mapping tags to indices in tags.
         self.init_freqs = []
         self.freqMap = {}
-    def tokenizeTextToSentences(text):
-        """Converts supplied text into tokenized sentences.
-        ### Also updates tags field in Tagger class with new tags as encountered.
-        ### Invariant: tags = list of unique tags encountered so far.
-
-        Args:
-            text (str): Raw text read in from a file in brown/ folder
-
-        Returns:
-            list[list[list[str][2]]]: List of sentences: each sentence is a list of words: each word is list of two strings: word string and tag string.
-            
-        """
-        pass
-    def tagStringToIndex(sentences):
-        """Converts tag strings to indices in tags field. Should be used after collecting all possible tags into tags field.
-
-        Args:
-            sentences (list[list[list[str,str]]]): 
-
-        Returns:
-            list[list[list[str,int]]]: 
-        """
-        pass
     def initializeTrellisAndEmmis(self):
         """Initializes Trellis and Emmis to arrays of appropriate dimensions.
         """
-        
+
         self.trellis = np.ones((len(self.tags),len(self.tags)))
         self.emmis = np.ones((len(self.words),len(self.tags)))
         self.init_freqs = np.ones((len(self.tags)))
@@ -72,26 +49,6 @@ class Tagger:
         self.logemissionProbs = np.log10((self.emmis * (1 / np.tile(np.sum(self.emmis, 0), (len(self.words), 1)))).T)
         self.logtransitionProbs = np.log10(self.trellis * (1 / np.tile(np.sum(self.trellis, 1).reshape((len(self.tags), 1)), (1, len(self.tags)))))
         self.loginit_probs = np.log10(self.init_freqs/ np.sum(self.init_freqs))
-    def transmissionProbability(self,pti,ti):
-        """returns transmission probability
-
-        Args:
-            pti (_type_): tag at i-1
-            ti (_type_): tag at i
-
-        Returns:
-            float: P(ti|ti-1)
-        """
-        return self.trellis[pti,ti]/np.sum(self.trellis[pti,:])
-    def emmissionProbability(self,ti,wi):
-        """returns P(wi|ti)
-
-        Args:
-            ti (_type_): tag at position i
-            wi (_type_): word at position i
-
-        """
-        return self.emmis[wi,ti]/np.sum(self.emmis[:,ti])    
     def evalMetrics(self,preds,trueTags):
         #unpack all preds,tags sentences into one array:
         for i in range(1,len(preds)):
@@ -129,7 +86,6 @@ class Tagger:
             best_path = self.viterbi(sent)
             answer.append(best_path)
         return answer
-
     def preProcSents(self,sents, train=True):
         if train==True:
             # qualtags = []
@@ -193,7 +149,6 @@ class Tagger:
         sentences = self.preProcSents(sentences, False)
         mapped_sentences = [[ self.wordinds[a] for a in sent] for sent in sentences]
         return mapped_sentences
-
     def saveTagger(self):
         np.save("trained/emmis", self.emmis)
         np.save("trained/trellis", self.trellis)
@@ -211,7 +166,7 @@ class Tagger:
         self.logemissionProbs = np.log10((self.emmis * (1 / np.tile(np.sum(self.emmis, 0), (len(self.words), 1)))).T)
         self.logtransitionProbs = np.log10(self.trellis * (1 / np.tile(np.sum(self.trellis, 1).reshape((len(self.tags), 1)), (1, len(self.tags)))))
         self.loginit_probs = np.log10(self.init_freqs/ np.sum(self.init_freqs))
-    def viterbi(self, wordlist):#(observations, states, start_p, trans_p, emit_p)
+    def viterbi(self, wordlist):
         states = np.arange(len(self.tags))
         wordlist = np.asarray(wordlist)
         logemissionProbs = np.log10((self.emmis * (1 / np.tile(np.sum(self.emmis, 0), (len(self.words), 1)))).T)
@@ -253,57 +208,57 @@ class Tagger:
         for i in range(len(tags)):
             sent2[i]+= '_'+tags[i]
         return ' '.join(sent2)
-def findEvalMetrics(k):
-    sents = list(brown.tagged_sents(tagset="universal"))
-    l = len(sents)
-    perm = np.random.permutation(l)
-    sents = np.asanyarray(sents,dtype=object)[perm].tolist()
-    res = []
-    now = time()
-    allitersppos = []
-    for i in range(k):
-        p1 = sents[:int((i*l)/k)]
-        p2 = sents[int((i+1)*l/k):]
-        dummyTest = sents[int((-1*l)/k):]
-        p1.extend(p2)
-        trainSents = p1
-        testSents = sents[int(i*l/k):int((i+1)*l/k)]
-        # testSents = dummyTest
-        testSentsOnlyWords = list(map(
-                        lambda sent:list(map(lambda wt:wt[0],sent)),
-                        testSents
-                        ))
-        testSentsOnlyTags = list(map(
-            lambda sent:list(map(lambda wt:wt[1],sent)),
-            testSents
-        ))
-        POStagger = Tagger()
-        POStagger.trainOn(trainSents)
-        POStagger.saveTagger()
-        predTags = POStagger.testOn(testSentsOnlyWords)
-        
-        confmat, acc, pposa = POStagger.evalMetrics(predTags,testSentsOnlyTags)
-        allitersppos.append(pposa)
-        np.savetxt(f'results/pposa_{i+1}.csv',pposa,delimiter=', ')
-        plt.imshow(confmat,cmap='hot',interpolation='nearest')
-        plt.xticks(np.arange(12),labels=POStagger.tags,fontsize=8)
-        plt.yticks(np.arange(12),labels=POStagger.tags,fontsize=8)
-        plt.savefig(f'results/confmat_{i+1}.png')
-        res.append(acc)
-        print(f'Time for iteration {i+1}: {time() - now}')
+    def getTrainedModel():
+        sents = list(brown.tagged_sents(tagset="universal"))
+        l = len(sents)
+        perm = np.random.permutation(l)
+        sents = np.asanyarray(sents,dtype=object)[perm].tolist()
+        tagger = Tagger()
+        tagger.trainOn(sents[:int(4*l/5)])
+        return tagger
+    def findEvalMetrics(kfold):
+        sents = list(brown.tagged_sents(tagset="universal"))
+        l = len(sents)
+        perm = np.random.permutation(l)
+        sents = np.asanyarray(sents,dtype=object)[perm].tolist()
+        res = []
         now = time()
-    np.savetxt('results/perposmetrics.csv',np.mean(allitersppos,0))
-    np.savetxt('results/accuracy.csv',res)
-    return res
-def getTrainedModel():
-    sents = list(brown.tagged_sents(tagset="universal"))
-    l = len(sents)
-    perm = np.random.permutation(l)
-    sents = np.asanyarray(sents,dtype=object)[perm].tolist()
-    tagger = Tagger()
-    tagger.trainOn(sents[:int(4*l/5)])
-    return tagger
+        allitersppos = []
+        for i in range(kfold):
+            p1 = sents[:int((i*l)/kfold)]
+            p2 = sents[int((i+1)*l/kfold):]
+            dummyTest = sents[int((-1*l)/kfold):]
+            p1.extend(p2)
+            trainSents = p1
+            testSents = sents[int(i*l/kfold):int((i+1)*l/kfold)]
+            # testSents = dummyTest
+            testSentsOnlyWords = list(map(
+                            lambda sent:list(map(lambda wt:wt[0],sent)),
+                            testSents
+                            ))
+            testSentsOnlyTags = list(map(
+                lambda sent:list(map(lambda wt:wt[1],sent)),
+                testSents
+            ))
+            POStagger = Tagger()
+            POStagger.trainOn(trainSents)
+            POStagger.saveTagger()
+            predTags = POStagger.testOn(testSentsOnlyWords)
+            
+            confmat, acc, pposa = POStagger.evalMetrics(predTags,testSentsOnlyTags)
+            allitersppos.append(pposa)
+            np.savetxt(f'results/pposa_{i+1}.csv',pposa,delimiter=', ')
+            plt.imshow(confmat,cmap='hot',interpolation='nearest')
+            plt.xticks(np.arange(12),labels=POStagger.tags,fontsize=8)
+            plt.yticks(np.arange(12),labels=POStagger.tags,fontsize=8)
+            plt.savefig(f'results/confmat_{i+1}.png')
+            res.append(acc)
+            print(f'Time for iteration {i+1}: {time() - now}')
+            now = time()
+        np.savetxt('results/perposmetrics.csv',np.mean(allitersppos,0))
+        np.savetxt('results/accuracy.csv',res)
+        return res
 if __name__=='__main__':
-    findEvalMetrics(5)
+    Tagger.findEvalMetrics(5)
 
     # tagger.saveTagger()
