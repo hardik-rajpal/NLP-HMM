@@ -1,3 +1,4 @@
+from this import d
 from time import time
 import matplotlib.pyplot as plt
 import numpy as np
@@ -220,6 +221,8 @@ class Tagger:
         self.emmis = np.load("emmis.npy")
         self.trellis = np.load("trellis.npy")
         self.init_prob = np.load("init_prob.npy")
+        self.words = np.loadtxt("words.txt",dtype='U')
+        self.tags = np.loadtxt("tags.txt",dtype='U')
     def dptable(self, V):
         
         yield " ".join(("%12d" % i) for i in range(len(V)))
@@ -242,9 +245,9 @@ class Tagger:
         
         for t in range(1, len(Y)):
             constvt1 = np.tile(np.array([V[t-1][:,0].flatten()]).T,len(states))
-            vals = constvt1+transitionProbs # 12x12
-            stateSel = np.argmax(vals,0)
-            transProbMax = np.max(vals,0).flatten()+np.log10(emissionProbs[:,Y[t]]).flatten()
+            vals = constvt1+transitionProbs.T # 12x12
+            stateSel = np.argmax(vals,1).flatten()
+            transProbMax = np.max(vals,1).flatten()+np.log10(emissionProbs[:,Y[t]]).flatten()
             V[t] = np.stack([transProbMax,stateSel],1)
         maxProb = -1000
         previousState = None
@@ -298,6 +301,7 @@ def findEvalMetrics(k):
         ))
         POStagger = Tagger()
         POStagger.trainOn(trainSents)
+        POStagger.saveTagger()
         predTags = POStagger.testOn(testSentsOnlyWords)
         
         confmat, acc, pposa = POStagger.evalMetrics(predTags,testSentsOnlyTags)
