@@ -1,4 +1,3 @@
-from this import d
 from time import time
 import matplotlib.pyplot as plt
 import numpy as np
@@ -12,7 +11,7 @@ class Tagger:
         self.words = []
         self.wordinds = {}#dictionary mapping words to indices in words.#helpful for mapping plural of a word to the same index if multiplexing nns and nn
         self.taginds = {}#dictionary mapping tags to indices in tags.
-        self.init_prob = []
+        self.init_freqs = []
         self.freqMap = {}
     def tokenizeTextToSentences(text):
         """Converts supplied text into tokenized sentences.
@@ -43,7 +42,7 @@ class Tagger:
         
         self.trellis = np.ones((len(self.tags),len(self.tags)))
         self.emmis = np.ones((len(self.words),len(self.tags)))
-        self.init_prob = np.ones((len(self.tags)))
+        self.init_freqs = np.ones((len(self.tags)))
     def updateTrellisAndEmmis(self,sentences,lfws):
         """Iterates through sentences (with optimizations), filling in trellis and emmis.
 
@@ -58,7 +57,7 @@ class Tagger:
             tmpemmis[pwi,pti] += 1
             if(self.freqMap[self.words[pwi]]<=2):
                 tmpemmis[self.wordinds['*'],pti] += 1
-            self.init_prob[pti] += 1
+            self.init_freqs[pti] += 1
             
             for wi,ti in sent[1:]:
                 tmptrellis[pti,ti] += 1
@@ -69,12 +68,10 @@ class Tagger:
         
         self.emmis += tmpemmis
         self.trellis += tmptrellis
-
-        #TODO : modify below to accomodate sentences in fly
-        self.init_prob = self.init_prob / np.sum(self.init_prob)
-        np.savetxt('emmis.csv',self.emmis)
-        np.savetxt('trellis.csv',self.trellis)
-        np.savetxt('initprob.csv',self.init_prob)
+        self.init_freqs += self.init_freqs
+        self.logemissionProbs = np.log10((self.emmis * (1 / np.tile(np.sum(self.emmis, 0), (len(self.words), 1)))).T)
+        self.logtransitionProbs = np.log10(self.trellis * (1 / np.tile(np.sum(self.trellis, 1).reshape((len(self.tags), 1)), (1, len(self.tags)))))
+        self.loginit_probs = np.log10(self.init_freqs/ np.sum(self.init_freqs))
     def transmissionProbability(self,pti,ti):
         """returns transmission probability
 
@@ -122,13 +119,9 @@ class Tagger:
         return confmat,accuracy,np.array(ppos)
     def trainOn(self, trainSents):
         mapped_sents,leastFreqWords = self.get_mapped_sentences(trainSents)
-        
         self.initializeTrellisAndEmmis()
         self.updateTrellisAndEmmis(mapped_sents,leastFreqWords)
-        np.savetxt('words.txt',self.words,fmt="%s")
-        np.savetxt('tags.txt',self.tags,fmt="%s")
-        np.savetxt('trellis.csv',self.trellis,fmt="%d")
-        np.savetxt('emmis.csv',self.emmis,fmt='%d')  
+        self.saveTagger()
     def testOn(self, testSents):
         mapped_sents = self.get_mapped_sentences_test(testSents)
         answer = []
@@ -148,13 +141,8 @@ class Tagger:
                         word[0] = '$amt$'
                     if(Tagger.isQualNum(word[0])):
                         word[0] = f'$qnw$'
-                        # qualtags.append(word[1])
                     sents[i][j] = word
-            # qt,c = np.unique(np.array(qualtags),return_counts=True)
-            # np.savetxt('qualtags.csv',qt,fmt="%s")
-            # np.savetxt('counttags.csv',c,fmt="%d")
         else:
-            # qualtags = []
             for i in range(len(sents)):
                 for j in range(len(sents[i])):
                     word = sents[i][j].lower()
@@ -162,12 +150,9 @@ class Tagger:
                         word = '$amt$'
                     if(Tagger.isQualNum(word)):
                         word = f'$qnw$'
-                        # qualtags.append(word[1])
                     if (not self.wordinds.__contains__(word)):
                         word = '*'
                     sents[i][j] = word
-            # qt,c = np.unique(np.array(qualtags),return_counts=True)
-            # np.savetxt('qualtags.csv',qt,fmt="%s")
         return sents
     def get_mapped_sentences(self, sents):
         sentences = sents        
@@ -188,8 +173,6 @@ class Tagger:
             self.freqMap[words[i]] = counts[i]
         leastFreqWords = words[counts<=freqThres].tolist()
         leastFreqWords = []
-        # np.savetxt('counts.csv',counts,fmt="%d")
-        
         self.tags = tags
         self.words = words.tolist()
         self.words.append('*')
@@ -212,38 +195,39 @@ class Tagger:
         return mapped_sentences
 
     def saveTagger(self):
-        np.save("emmis", self.emmis)
-        np.save("trellis", self.trellis)
-        np.save("init_prob", self.init_prob)
-        np.savetxt("words.txt",self.words,fmt="%s")
-        np.savetxt("tags.txt",self.tags,fmt="%s")
+        np.save("trained/emmis", self.emmis)
+        np.save("trained/trellis", self.trellis)
+        np.save("trained/init_prob", self.init_freqs)
+        np.savetxt("trained/words.txt",self.words,fmt="%s")
+        np.savetxt("trained/tags.txt",self.tags,fmt="%s")
     def loadTagger(self):
-        self.emmis = np.load("emmis.npy")
-        self.trellis = np.load("trellis.npy")
-        self.init_prob = np.load("init_prob.npy")
-        self.words = np.loadtxt("words.txt",dtype='U')
+        self.emmis = np.load("trained/emmis.npy")
+        self.trellis = np.load("trained/trellis.npy")
+        self.init_freqs = np.load("trained/init_prob.npy")
+        self.words = np.loadtxt("trained/words.txt",dtype='U')
         self.wordinds = {k:v for v,k in enumerate(self.words)}
-        self.tags = np.loadtxt("tags.txt",dtype='U')
+        self.tags = np.loadtxt("trained/tags.txt",dtype='U')
         self.taginds = {k:v for v,k in enumerate(self.tags)}
-    def viterbi(self, Y):#(observations, states, start_p, trans_p, emit_p)
-
-        K = len(self.tags)
+        self.logemissionProbs = np.log10((self.emmis * (1 / np.tile(np.sum(self.emmis, 0), (len(self.words), 1)))).T)
+        self.logtransitionProbs = np.log10(self.trellis * (1 / np.tile(np.sum(self.trellis, 1).reshape((len(self.tags), 1)), (1, len(self.tags)))))
+        self.loginit_probs = np.log10(self.init_freqs/ np.sum(self.init_freqs))
+    def viterbi(self, wordlist):#(observations, states, start_p, trans_p, emit_p)
         states = np.arange(len(self.tags))
-        Y = np.asarray(Y)
-        emissionProbs = (self.emmis * (1 / np.tile(np.sum(self.emmis, 0), (len(self.words), 1)))).T
-        transitionProbs = self.trellis * (1 / np.tile(np.sum(self.trellis, 1).reshape((K, 1)), (1, len(self.tags))))
-
-        V = np.zeros((len(Y),len(states),2))
+        wordlist = np.asarray(wordlist)
+        logemissionProbs = np.log10((self.emmis * (1 / np.tile(np.sum(self.emmis, 0), (len(self.words), 1)))).T)
+        logtransitionProbs = np.log10(self.trellis * (1 / np.tile(np.sum(self.trellis, 1).reshape((len(self.tags), 1)), (1, len(self.tags)))))
+        loginit_probs = np.log10(self.init_freqs/ np.sum(self.init_freqs))
+        V = np.zeros((len(wordlist),len(states),2))
         V[0] = np.tile(
             (
-                np.log10(np.array([(self.init_prob).flatten()*(emissionProbs[:,Y[0]]).flatten()]))
+                (np.array([loginit_probs.flatten()+(logemissionProbs[:,wordlist[0]]).flatten()]))
             ).T,
             reps=2)
-        for t in range(1, len(Y)):
+        for t in range(1, len(wordlist)):
             constvt1 = np.tile(np.array([V[t-1][:,0].flatten()]).T,len(states))
-            vals = constvt1+transitionProbs # 12x12
+            vals = constvt1+logtransitionProbs # 12x12
             stateSel = np.argmax(vals,0).flatten()
-            transProbMax = np.max(vals,0).flatten()+np.log10(emissionProbs[:,Y[t]]).flatten()
+            transProbMax = np.max(vals,0).flatten()+logemissionProbs[:,wordlist[t]].flatten()
             V[t] = np.stack([transProbMax,stateSel],1)
         maxProb = -1000
         previousState = None
@@ -251,15 +235,13 @@ class Tagger:
         maxProbInd = np.argmax(V[-1,:,0])
         previousState = int(V[-1,:,1][maxProbInd])
         maxProbVal = V[-1,:,0][maxProbInd]
-        outputs.append(previousState)
         if (maxProbVal<maxProb):
             print("Probability is 0")
             return []
+        outputs.append(maxProbInd)
         for t in range(len(V) - 2, -1, -1):
             outputs.insert(0, V[t + 1][previousState][1])
             previousState = int(V[t + 1][previousState][1])
-
-        # print ("The steps of states are " + " ".join(self.tags[opt]) + " with highest probability of %s" % max_prob)
         for i in range(len(outputs)):
             outputs[i] = self.tags[int(outputs[i])]
         # print(' '.join(list(map(lambda w,t: f'{w}_{t}',list(map(lambda x:(self.words[x]),Y.tolist())),outputs))))
@@ -302,17 +284,16 @@ def findEvalMetrics(k):
         
         confmat, acc, pposa = POStagger.evalMetrics(predTags,testSentsOnlyTags)
         allitersppos.append(pposa)
-        np.savetxt(f'confmat_{i+1}.csv',confmat,delimiter=', ')
-        np.savetxt(f'pposa_{i+1}.csv',pposa,delimiter=', ')
+        np.savetxt(f'results/pposa_{i+1}.csv',pposa,delimiter=', ')
         plt.imshow(confmat,cmap='hot',interpolation='nearest')
         plt.xticks(np.arange(12),labels=POStagger.tags,fontsize=8)
         plt.yticks(np.arange(12),labels=POStagger.tags,fontsize=8)
-        plt.savefig(f'confmat_{i+1}.png')
+        plt.savefig(f'results/confmat_{i+1}.png')
         res.append(acc)
         print(f'Time for iteration {i+1}: {time() - now}')
         now = time()
-    np.savetxt('perposmetrics.csv',np.mean(allitersppos,0))
-    np.savetxt('accuracy.csv',res)
+    np.savetxt('results/perposmetrics.csv',np.mean(allitersppos,0))
+    np.savetxt('results/accuracy.csv',res)
     return res
 def getTrainedModel():
     sents = list(brown.tagged_sents(tagset="universal"))

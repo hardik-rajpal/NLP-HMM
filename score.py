@@ -1,6 +1,6 @@
 import numpy as np
-scores = np.loadtxt('perposmetrics.csv',delimiter=', ')
-emmis = np.loadtxt('emmis.csv')
+scores = np.loadtxt('results/perposmetrics.csv',delimiter=', ')
+emmis = np.load('trained/emmis.npy')
 prec = scores[0,:]
 rec = scores[1,:]
 beta = 0.5
@@ -16,4 +16,4 @@ fscores = [
 for i in range(len(fscores)):
     score,_ = fscores[i]
     fscores[i][1] = fbeta(score)(wtdprec,wtdrec)
-np.savetxt('fscores.csv',np.array(fscores))
+np.savetxt('results/fscores.csv',np.array(fscores))
