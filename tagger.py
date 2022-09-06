@@ -233,12 +233,15 @@ class Tagger:
         emissionProbs = (self.emmis * (1 / np.tile(np.sum(self.emmis, 0), (len(self.words), 1)))).T
         transitionProbs = self.trellis * (1 / np.tile(np.sum(self.trellis, 1).reshape((K, 1)), (1, len(self.tags))))
 
-        V = [np.zeros((len(states),2))]
-        for st in states:
-            V[0][st] = [ np.math.log10(self.init_prob[st] * emissionProbs[st][Y[0]]), None]
-   
+        V = np.zeros((len(Y),len(states),2))
+        V[0] = np.tile(
+            (
+                np.array([np.log10(self.init_prob).flatten()*(emissionProbs[:,Y[0]]).flatten()])
+            ).T,
+            reps=2)
+        # for st in states:
+        #     V[0][st] = [ np.math.log10(self.init_prob[st] * emissionProbs[st][Y[0]]), None]
         for t in range(1, len(Y)):
-            V.append(np.zeros((len(states),2)))
             for st in states:
                 max_tr_prob = V[t - 1][states[0]][0] + np.math.log10(transitionProbs[states[0]][st])
                 prev_st_selected = states[0]
@@ -272,7 +275,8 @@ class Tagger:
         # print ("The steps of states are " + " ".join(self.tags[opt]) + " with highest probability of %s" % max_prob)
         for i in range(len(opt)):
             opt[i] = self.tags[int(opt[i])]
-        
+        print(' '.join(list(map(lambda w,t: f'{w}_{t}',list(map(lambda x:(self.words[x]),Y.tolist())),opt))))
+        exit()
         return opt
     def demoSent(self,sent):
         sent2 = sent[:].split(' ')
@@ -319,7 +323,6 @@ def findEvalMetrics(k):
         res.append(acc)
         print(f'Time for iteration {i+1}: {time() - now}')
         now = time()
-        break
     np.savetxt('perposmetrics.csv',np.mean(allitersppos,0))
     np.savetxt('accuracy.csv',res)
     return res
