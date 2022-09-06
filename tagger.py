@@ -239,20 +239,20 @@ class Tagger:
                 np.array([np.log10(self.init_prob).flatten()*(emissionProbs[:,Y[0]]).flatten()])
             ).T,
             reps=2)
-        # for st in states:
-        #     V[0][st] = [ np.math.log10(self.init_prob[st] * emissionProbs[st][Y[0]]), None]
         for t in range(1, len(Y)):
-            for st in states:
-                max_tr_prob = V[t - 1][states[0]][0] + np.math.log10(transitionProbs[states[0]][st])
-                prev_st_selected = states[0]
-                for prev_st in states[1:]:
-                    tr_prob = V[t - 1][prev_st][0] + np.math.log10(transitionProbs[prev_st][st])
-                    if tr_prob > max_tr_prob:
-                        max_tr_prob = tr_prob
-                        prev_st_selected = prev_st
-                max_prob = max_tr_prob + np.math.log10(emissionProbs[st][Y[t]])
-                V[t][st] = [max_prob,prev_st_selected]
-    
+            Vt1:np.ndarray = V[t-1]
+            constvt1 = np.tile(np.array([Vt1[:,0].flatten()]).T,len(states))
+            vals = constvt1+transitionProbs # 12x12
+            prev_st_selected = np.argmax(vals,0)
+            max_tr_prob = np.max(vals,0).flatten()+np.log10(emissionProbs[:,Y[t]]).flatten()
+            V[t] = np.stack([max_tr_prob,prev_st_selected],1)
+            # for st in states:
+            #     vals = Vt1[:,0].flatten()+np.log10(transitionProbs[:,st]).flatten()
+            #     prev_st_selected = np.argmax(vals,0)
+            #     max_tr_prob = np.max(vals,0)
+            #     max_prob = max_tr_prob + np.math.log10(emissionProbs[st][Y[t]])
+            #     V[t][st] = [max_prob,prev_st_selected]
+            V[t-1] = Vt1
         opt = []
         max_prob = -1000
         best_st = None
