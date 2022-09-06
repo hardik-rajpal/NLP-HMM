@@ -1,4 +1,4 @@
-*.npy
-*.csv
-*.txt
-*.png
+*
+!*.py
+!*.md
+!*.pdf
