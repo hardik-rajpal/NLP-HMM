@@ -239,45 +239,33 @@ class Tagger:
                 np.array([np.log10(self.init_prob).flatten()*(emissionProbs[:,Y[0]]).flatten()])
             ).T,
             reps=2)
+        
         for t in range(1, len(Y)):
-            Vt1:np.ndarray = V[t-1]
-            constvt1 = np.tile(np.array([Vt1[:,0].flatten()]).T,len(states))
+            constvt1 = np.tile(np.array([V[t-1][:,0].flatten()]).T,len(states))
             vals = constvt1+transitionProbs # 12x12
-            prev_st_selected = np.argmax(vals,0)
-            max_tr_prob = np.max(vals,0).flatten()+np.log10(emissionProbs[:,Y[t]]).flatten()
-            V[t] = np.stack([max_tr_prob,prev_st_selected],1)
-            # for st in states:
-            #     vals = Vt1[:,0].flatten()+np.log10(transitionProbs[:,st]).flatten()
-            #     prev_st_selected = np.argmax(vals,0)
-            #     max_tr_prob = np.max(vals,0)
-            #     max_prob = max_tr_prob + np.math.log10(emissionProbs[st][Y[t]])
-            #     V[t][st] = [max_prob,prev_st_selected]
-            V[t-1] = Vt1
-        opt = []
-        max_prob = -1000
-        best_st = None
-    
-        for st, data in enumerate(V[-1]):
-            if data[0] > max_prob:
-                max_prob = data[0]
-                best_st = st
-        opt.append(best_st)
-        previous = best_st
-
-        if previous is None:
+            stateSel = np.argmax(vals,0)
+            transProbMax = np.max(vals,0).flatten()+np.log10(emissionProbs[:,Y[t]]).flatten()
+            V[t] = np.stack([transProbMax,stateSel],1)
+        maxProb = -1000
+        previousState = None
+        outputs = []
+        maxProbInd = np.argmax(V[-1,:,0])
+        previousState = int(V[-1,:,1][maxProbInd])
+        maxProbVal = V[-1,:,0][maxProbInd]
+        outputs.append(previousState)
+        if (maxProbVal<maxProb):
             print("Probability is 0")
             return []
-    
         for t in range(len(V) - 2, -1, -1):
-            opt.insert(0, V[t + 1][int(previous)][1])
-            previous = V[t + 1][int(previous)][1]
+            outputs.insert(0, V[t + 1][previousState][1])
+            previousState = int(V[t + 1][previousState][1])
 
         # print ("The steps of states are " + " ".join(self.tags[opt]) + " with highest probability of %s" % max_prob)
-        for i in range(len(opt)):
-            opt[i] = self.tags[int(opt[i])]
-        print(' '.join(list(map(lambda w,t: f'{w}_{t}',list(map(lambda x:(self.words[x]),Y.tolist())),opt))))
-        exit()
-        return opt
+        for i in range(len(outputs)):
+            outputs[i] = self.tags[int(outputs[i])]
+        # print(' '.join(list(map(lambda w,t: f'{w}_{t}',list(map(lambda x:(self.words[x]),Y.tolist())),outputs))))
+        # exit()
+        return outputs
     def demoSent(self,sent):
         sent2 = sent[:].split(' ')
         tags = self.testOn([sent.split(' ')])[0]
