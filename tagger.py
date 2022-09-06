@@ -71,7 +71,7 @@ class Tagger:
         self.trellis += tmptrellis
 
         #TODO : modify below to accomodate sentences in fly
-        self.init_prob = self.init_prob / len(sentences)
+        self.init_prob = self.init_prob / np.sum(self.init_prob)
         np.savetxt('emmis.csv',self.emmis)
         np.savetxt('trellis.csv',self.trellis)
         np.savetxt('initprob.csv',self.init_prob)
@@ -222,9 +222,10 @@ class Tagger:
         self.trellis = np.load("trellis.npy")
         self.init_prob = np.load("init_prob.npy")
         self.words = np.loadtxt("words.txt",dtype='U')
+        self.wordinds = {k:v for v,k in enumerate(self.words)}
         self.tags = np.loadtxt("tags.txt",dtype='U')
+        self.taginds = {k:v for v,k in enumerate(self.tags)}
     def dptable(self, V):
-        
         yield " ".join(("%12d" % i) for i in range(len(V)))
         for state in V[0]:
             yield "%.7s: " % state + " ".join("%.7s" % ("%f" % v[state][0]) for v in V)
@@ -239,15 +240,15 @@ class Tagger:
         V = np.zeros((len(Y),len(states),2))
         V[0] = np.tile(
             (
-                np.array([np.log10(self.init_prob).flatten()*(emissionProbs[:,Y[0]]).flatten()])
+                np.log10(np.array([(self.init_prob).flatten()*(emissionProbs[:,Y[0]]).flatten()]))
             ).T,
             reps=2)
         
         for t in range(1, len(Y)):
             constvt1 = np.tile(np.array([V[t-1][:,0].flatten()]).T,len(states))
-            vals = constvt1+transitionProbs.T # 12x12
-            stateSel = np.argmax(vals,1).flatten()
-            transProbMax = np.max(vals,1).flatten()+np.log10(emissionProbs[:,Y[t]]).flatten()
+            vals = constvt1+transitionProbs # 12x12
+            stateSel = np.argmax(vals,0).flatten()
+            transProbMax = np.max(vals,0).flatten()+np.log10(emissionProbs[:,Y[t]]).flatten()
             V[t] = np.stack([transProbMax,stateSel],1)
         maxProb = -1000
         previousState = None
