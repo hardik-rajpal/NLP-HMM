@@ -1,5 +1,5 @@
 import numpy as np
-scores = np.loadtxt('results/perposmetrics.csv',delimiter=', ')
+scores = np.loadtxt('results/perposmetrics.csv')
 emmis = np.load('trained/emmis.npy')
 prec = scores[0,:]
 rec = scores[1,:]

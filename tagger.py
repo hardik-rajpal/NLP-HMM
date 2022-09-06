@@ -123,7 +123,6 @@ class Tagger:
         words_all = tagged_words[:, 0]
         words_all = list(map(lambda x: x, words_all))
         words,counts = np.unique(words_all,return_counts=True)
-        np.savetxt('words.csv',words,fmt="%s")
         freqThres = 2
         for i in range(len(counts)):
             self.freqMap[words[i]] = counts[i]
