@@ -225,10 +225,6 @@ class Tagger:
         self.wordinds = {k:v for v,k in enumerate(self.words)}
         self.tags = np.loadtxt("tags.txt",dtype='U')
         self.taginds = {k:v for v,k in enumerate(self.tags)}
-    def dptable(self, V):
-        yield " ".join(("%12d" % i) for i in range(len(V)))
-        for state in V[0]:
-            yield "%.7s: " % state + " ".join("%.7s" % ("%f" % v[state][0]) for v in V)
     def viterbi(self, Y):#(observations, states, start_p, trans_p, emit_p)
 
         K = len(self.tags)
@@ -243,7 +239,6 @@ class Tagger:
                 np.log10(np.array([(self.init_prob).flatten()*(emissionProbs[:,Y[0]]).flatten()]))
             ).T,
             reps=2)
-        
         for t in range(1, len(Y)):
             constvt1 = np.tile(np.array([V[t-1][:,0].flatten()]).T,len(states))
             vals = constvt1+transitionProbs # 12x12
