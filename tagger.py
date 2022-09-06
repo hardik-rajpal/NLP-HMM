@@ -95,9 +95,6 @@ class Tagger:
         """
         return self.emmis[wi,ti]/np.sum(self.emmis[:,ti])    
     def evalMetrics(self,preds,trueTags):
-        # print(preds[:10])
-        # print(trueTags[:10])
-        # exit()
         #unpack all preds,tags sentences into one array:
         for i in range(1,len(preds)):
             preds[0].extend(preds[i])
@@ -137,8 +134,6 @@ class Tagger:
         for sent in mapped_sents:
             best_path = self.viterbi(sent)
             answer.append(best_path)
-            # print(answer)
-            # exit()
         return answer
 
     def preProcSents(self,sents, train=True):
@@ -185,7 +180,6 @@ class Tagger:
         
         words_all = tagged_words[:, 0]
         words_all = list(map(lambda x: x, words_all))
-        # print(f'total words: {len(words_all)}')
         words,counts = np.unique(words_all,return_counts=True)
         np.savetxt('words.csv',words,fmt="%s")
         freqThres = 2
@@ -199,7 +193,6 @@ class Tagger:
         self.words = words.tolist()
         self.words.append('*')
         self.words = np.asarray(self.words)
-        # print(f'words ({len(self.words)}): {self.words} \n tags ({len(self.tags)}): {tags}')
         self.wordinds.clear()
         for i in range(len(self.words)):
             self.wordinds[self.words[i]] = i
@@ -208,7 +201,6 @@ class Tagger:
             self.taginds[self.tags[i]] = i
         
         mapped_sentences = [[ [self.wordinds[a], self.taginds[b]] for a, b in sent] for sent in sentences]
-        # print(sentences[0], mapped_sentences[0])
 
         return mapped_sentences,leastFreqWords
     def get_mapped_sentences_test(self, sents):
@@ -232,45 +224,39 @@ class Tagger:
         
         yield " ".join(("%12d" % i) for i in range(len(V)))
         for state in V[0]:
-            yield "%.7s: " % state + " ".join("%.7s" % ("%f" % v[state]["prob"]) for v in V)
+            yield "%.7s: " % state + " ".join("%.7s" % ("%f" % v[state][0]) for v in V)
     def viterbi(self, Y):#(observations, states, start_p, trans_p, emit_p)
 
         K = len(self.tags)
         states = np.arange(len(self.tags))
-        observations = np.asarray(Y)
+        Y = np.asarray(Y)
+        emissionProbs = (self.emmis * (1 / np.tile(np.sum(self.emmis, 0), (len(self.words), 1)))).T
+        transitionProbs = self.trellis * (1 / np.tile(np.sum(self.trellis, 1).reshape((K, 1)), (1, len(self.tags))))
 
-        trans_p = self.trellis * (1 / np.tile(np.sum(self.trellis, 1).reshape((K, 1)), (1, len(self.tags))))
-
-        B = self.emmis * (1 / np.tile(np.sum(self.emmis, 0), (len(self.words), 1)))
-
-        emit_p = B.T
-        pi = self.init_prob
-
-        V = [{}]
+        V = [np.zeros((len(states),2))]
         for st in states:
-            V[0][st] = {"prob": np.math.log10(pi[st] * emit_p[st][observations[0]]), "prev": None}
+            V[0][st] = [ np.math.log10(self.init_prob[st] * emissionProbs[st][Y[0]]), None]
    
-        for t in range(1, len(observations)):
-            V.append({})
+        for t in range(1, len(Y)):
+            V.append(np.zeros((len(states),2)))
             for st in states:
-                max_tr_prob = V[t - 1][states[0]]["prob"] + np.math.log10(trans_p[states[0]][st])
+                max_tr_prob = V[t - 1][states[0]][0] + np.math.log10(transitionProbs[states[0]][st])
                 prev_st_selected = states[0]
                 for prev_st in states[1:]:
-                    tr_prob = V[t - 1][prev_st]["prob"] + np.math.log10(trans_p[prev_st][st])
+                    tr_prob = V[t - 1][prev_st][0] + np.math.log10(transitionProbs[prev_st][st])
                     if tr_prob > max_tr_prob:
                         max_tr_prob = tr_prob
                         prev_st_selected = prev_st
-    
-                max_prob = max_tr_prob + np.math.log10(emit_p[st][observations[t]])
-                V[t][st] = {"prob": max_prob, "prev": prev_st_selected}
+                max_prob = max_tr_prob + np.math.log10(emissionProbs[st][Y[t]])
+                V[t][st] = [max_prob,prev_st_selected]
     
         opt = []
         max_prob = -1000
         best_st = None
     
-        for st, data in V[-1].items():
-            if data["prob"] > max_prob:
-                max_prob = data["prob"]
+        for st, data in enumerate(V[-1]):
+            if data[0] > max_prob:
+                max_prob = data[0]
                 best_st = st
         opt.append(best_st)
         previous = best_st
@@ -280,13 +266,12 @@ class Tagger:
             return []
     
         for t in range(len(V) - 2, -1, -1):
-            # print(previous)
-            opt.insert(0, V[t + 1][previous]["prev"])
-            previous = V[t + 1][previous]["prev"]
+            opt.insert(0, V[t + 1][int(previous)][1])
+            previous = V[t + 1][int(previous)][1]
 
         # print ("The steps of states are " + " ".join(self.tags[opt]) + " with highest probability of %s" % max_prob)
         for i in range(len(opt)):
-            opt[i] = self.tags[opt[i]]
+            opt[i] = self.tags[int(opt[i])]
         
         return opt
     def demoSent(self,sent):
@@ -300,7 +285,6 @@ def findEvalMetrics(k):
     l = len(sents)
     perm = np.random.permutation(l)
     sents = np.asanyarray(sents,dtype=object)[perm].tolist()
-    # print(sents[0])
     res = []
     now = time()
     allitersppos = []
@@ -320,7 +304,6 @@ def findEvalMetrics(k):
             lambda sent:list(map(lambda wt:wt[1],sent)),
             testSents
         ))
-        # print(testSentsOnlyTags[:10])
         POStagger = Tagger()
         POStagger.trainOn(trainSents)
         predTags = POStagger.testOn(testSentsOnlyWords)
@@ -336,6 +319,7 @@ def findEvalMetrics(k):
         res.append(acc)
         print(f'Time for iteration {i+1}: {time() - now}')
         now = time()
+        break
     np.savetxt('perposmetrics.csv',np.mean(allitersppos,0))
     np.savetxt('accuracy.csv',res)
     return res
