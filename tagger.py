@@ -15,19 +15,33 @@ Train Order:
 """
 AMT = '$amt$'
 QNW = '$qnw$'
+###Model related data:
+layerszs = [12]
+MAX_EPOCHS = 50
+BATCHSZ = 256
+lr = 0.01
+ 
 class Network(nn.Module):
     def __init__(self, lyrszs:list[int]):
         #lyrszs[0] = 12 (#features)
         #lyrszs[-1] = 12 (#tags)
-        self.layers = []
+        super(Network, self).__init__()
+        self.layers = nn.ModuleList()
         for i in range(1,len(lyrszs)):
             self.layers.append(nn.Linear(lyrszs[i-1],lyrszs[i]))
-            self.layers.append(nn.Sigmoid())
+            self.layers.append(nn.Softmax(1))
     def forward(self,X:list[int]):
         for layer in self.layers:
             X = layer(X)
         return X
-
+    def loss(self,predvects,labels:torch.Tensor):
+        labvects = torch.zeros_like(predvects)
+        for x in list(zip(torch.tensor(np.arange(len(labels),dtype=int),dtype=torch.long),labels.type(torch.long))):
+            labvects[x[0],x[1]] = 1
+        losses = (labvects-predvects)**2
+        return torch.mean(torch.sum(losses,1))
+    def accuracy(self,predvects,labels):
+        return np.round(100*(labels[torch.argmax(predvects,1)==labels].shape[0]/labels.shape[0]),2)
 class Tagger:
     NUMTAGS = 12
     isAmount = lambda word:(re.compile('\W[\d,.]+').match(word)!=None)
@@ -39,8 +53,8 @@ class Tagger:
         self.taginds = {}#dictionary mapping tags to indices in tags.
         self.init_freqs = []
         self.freqMap = {}
-        self.prefixes = ['re','un','de','co','']
-        self.suffixes = ['ed','ly','ies','s','es','ied','']
+        self.prefixes = np.loadtxt('prefs.txt',dtype=np.unicode_).tolist()
+        self.suffixes = np.loadtxt('suffs.txt',dtype=np.unicode_).tolist()
         self.prefixes = sorted(self.prefixes,key=lambda s:-len(s))
         self.suffixes = sorted(self.suffixes,key=lambda s:-len(s))
         self.prefinds = {}
@@ -49,43 +63,7 @@ class Tagger:
             self.prefinds[pref] = i
         for i,suff in enumerate(self.suffixes):
             self.suffinds[suff] = i
-        
-    def initializeTrellisAndEmmis(self):
-        """Initializes Trellis and Emmis to arrays of appropriate dimensions.
-        """
-
-        self.trellis = np.ones((len(self.tags),len(self.tags)))
-        self.emmis = np.ones((len(self.words),len(self.tags)))
-        self.init_freqs = np.ones((len(self.tags)))
-    def updateTrellisAndEmmis(self,sentences,lfws):
-        """Iterates through sentences (with optimizations), filling in trellis and emmis.
-
-        Args:
-            sentences (list[list[list[str,int]]]): _description_
-        """
-        tmpemmis = np.zeros_like(self.emmis)
-        tmptrellis = np.zeros_like(self.trellis)
-
-        for sent in sentences:
-            pwi, pti = sent[0]
-            tmpemmis[pwi,pti] += 1
-            if(self.freqMap[self.words[pwi]]<=2):
-                tmpemmis[self.wordinds['*'],pti] += 1
-            self.init_freqs[pti] += 1
-            
-            for wi,ti in sent[1:]:
-                tmptrellis[pti,ti] += 1
-                tmpemmis[wi,ti] += 1
-                if(self.freqMap[self.words[wi]]<=2):
-                    tmpemmis[self.wordinds['*'],ti] += 1
-                pti = ti
-        
-        self.emmis += tmpemmis
-        self.trellis += tmptrellis
-        self.init_freqs += self.init_freqs
-        self.logemissionProbs = np.log10((self.emmis * (1 / np.tile(np.sum(self.emmis, 0), (len(self.words), 1)))).T)
-        self.logtransitionProbs = np.log10(self.trellis * (1 / np.tile(np.sum(self.trellis, 1).reshape((len(self.tags), 1)), (1, len(self.tags)))))
-        self.loginit_probs = np.log10(self.init_freqs/ np.sum(self.init_freqs))
+        self.model = None # set to a nn.Module object after training.
     def evalMetrics(self,preds,trueTags):
         #unpack all preds,tags sentences into one array:
         for i in range(1,len(preds)):
@@ -144,14 +122,62 @@ class Tagger:
             iscapitalized,#iscapitalized
             isallcapitalized,#isallcapitalized
         ]))
-    def wordsToFeatures(self,words:list[list[int]]):
-        featuredWords:list[list[list[float]]] = []
-        for wordlist in words:
-            featuredWords.append([])
-            for i in range(len(wordlist)):
-                featuredWords[-1].append(self.featuresOf(wordlist[i]))
-    def trainNetwork(self,featured_sents,featured_sents_tags):
-        pass
+    def getBatch(self,trainX:torch.Tensor,trainY:torch.Tensor):
+        N = trainX.shape[0]
+        perm = torch.randperm(N)
+        trainX = trainX[perm]
+        trainY = trainY[perm]
+        for i in range(BATCHSZ,N,BATCHSZ):
+            yield trainX[i:i+BATCHSZ],trainY[i:i+BATCHSZ] 
+    def plot(self,val_accs, losses):
+        """
+            You can use this function to visualize progress of
+            the training loss and validation accuracy  
+        """
+        plt.figure(figsize=(14,6))
+
+        plt.subplot(1, 2, 1)
+        plt.xlabel("Epoch", fontsize=18)
+        plt.ylabel("Val Accuracy", fontsize=18)
+        plt.plot(val_accs)
+        plt.xticks(fontsize=16)
+        plt.yticks(fontsize=16)
+
+        plt.subplot(1, 2, 2)
+        plt.xlabel("Epoch", fontsize=18)
+        plt.ylabel("Train Loss", fontsize=18)
+        plt.plot(losses)
+        plt.xticks(fontsize=16)
+        plt.yticks(fontsize=16)
+        plt.show()
+
+    def trainNetwork(self,trainX:torch.Tensor,trainY:torch.Tensor):
+        model = Network([trainX[0].shape[0],*layerszs,Tagger.NUMTAGS])
+        losses = []
+        accs = []
+        opt = torch.optim.SGD(model.parameters(),lr=lr)
+        for i in range(MAX_EPOCHS):
+            model.train()
+            totalloss = 0
+            totalacc = 0
+            print(f'Numiters: {int(trainX.shape[0]/BATCHSZ)}, #insts: {trainX.shape[0]}')
+            for trainXSample,trainYSample in self.getBatch(trainX,trainY):
+                # print(trainXSample.shape,trainYSample.shape)
+                # continue
+                opt.zero_grad()
+                predVects = model(trainXSample)
+                loss = model.loss(predVects,trainYSample)
+                totalloss+=loss.item()
+                totalacc+=(model.accuracy(predVects,trainYSample))
+                loss.backward()
+                opt.step()
+            totalloss/=int(trainX.shape[0]/BATCHSZ)
+            totalacc/=int(trainX.shape[0]/BATCHSZ)
+            accs.append(totalacc)
+            losses.append(totalloss)
+            print(f'acc: {totalacc}; loss:{totalloss}')
+        self.plot(accs,losses)
+        return model
     def separateWordsTags(self,mapped_sents):
         words:list[list[str]] = []
         tags:list[list[str]] = []
@@ -160,7 +186,6 @@ class Tagger:
             for (word,tag) in sent:
                 words[-1].append(word)
                 tags[-1].append(tag)
-        
         return words,tags
     def mapTagsToInds(self,tags):
         tagset = set()
@@ -179,9 +204,9 @@ class Tagger:
             for i in range(len(tagsent)):
                 mappedTags[-1].append(self.taginds[tagsent[i]])
         return mappedTags
-    def mapWordsToFVs(self,words):
+    def mapWordsToFVs(self,words,train=True):
         allwords = []
-        preprocwords = self.preProcSents(words)
+        preprocwords = self.preProcSents(words,train)
         for sent in preprocwords:
             allwords.extend(sent)
         allwords.extend(['*',''])
@@ -205,84 +230,36 @@ class Tagger:
         for i in range(len(featwords)):
             collapsed_featwords.extend(featwords[i])
             collapsed_taginds.extend(taginds[i])
-        print(collapsed_featwords[:2])
-        print(collapsed_taginds[:2])
-        return
-        self.trainNetwork(collapsed_featwords,collapsed_taginds)
-        self.saveTagger()
+        model = self.trainNetwork(torch.tensor(np.array(collapsed_featwords,dtype=np.float32)),torch.tensor(np.array(collapsed_taginds,dtype=np.float32)))
+        self.model = model
+        # self.saveTagger(model)
     def testOn(self, testSents):
-        mapped_sents = self.get_mapped_sentences_test(testSents)
+        featwords = self.mapWordsToFVs(testSents,False)
         answer = []
-        for sent in mapped_sents:
-            best_path = self.viterbi(sent)
-            answer.append(best_path)
-        return answer
-    def preProcSents(self,sents, train=True):
-        if train==True:
-            for i in range(len(sents)):
-                for j in range(len(sents[i])):
-                    word = sents[i][j]
-                    word = word.lower()
-                    if(Tagger.isAmount(word)):
-                        word = AMT
-                    if(Tagger.isQualNum(word)):
-                        word = QNW
-                    sents[i][j] = word
-        else:
-            for i in range(len(sents)):
-                for j in range(len(sents[i])):
-                    word = sents[i][j].lower()
-                    if(Tagger.isAmount(word)):
-                        word = AMT
-                    if(Tagger.isQualNum(word)):
-                        word = QNW
-                    if (not self.wordinds.__contains__(word)):
-                        word = '*'
-                    sents[i][j] = word
+        for i in range(len(featwords)):
+            tags = []
+            answer.append([])
+            tagprobs = self.model(torch.tensor(np.array(featwords[i])))
+            for j,(wi,ti) in enumerate(zip((featwords[:,0]).numpy().tolist(),np.argmax(tagprobs,1))):
+                w = testSents[i][j]
+                t = self.tags[ti]
+                answer[-1].append(f'{w}_{t}')
+                tags.append(ti)
+        return tags,answer
+    def preProcSents(self,sents, train):
+        for i in range(len(sents)):
+            for j in range(len(sents[i])):
+                word = sents[i][j]
+                word = word.lower()
+                if(Tagger.isAmount(word)):
+                    word = AMT
+                if(Tagger.isQualNum(word)):
+                    word = QNW
+                if (train==False and (not self.wordinds.__contains__(word))):
+                    word = '*'
+                sents[i][j] = word
         return sents
-    def get_mapped_sentences(self, sents):
-        sentences = sents        
-        tagged_words = []
-        sentences = self.preProcSents(sentences)
-        for sent in sentences:
-            for word in sent:
-                tagged_words.append(word)
-        tagged_words = np.asarray(tagged_words)
-        tags = np.unique(tagged_words[:,1])
-        
-        words_all = tagged_words[:, 0]
-        words_all = list(map(lambda x: x, words_all))
-        words,counts = np.unique(words_all,return_counts=True)
-        freqThres = 2
-        for i in range(len(counts)):
-            self.freqMap[words[i]] = counts[i]
-        # leastFreqWords = words[counts<=freqThres].tolist()
-        # leastFreqWords = []
-        self.tags = tags
-        self.words = words.tolist()
-        self.words.append('*')
-        self.words = np.asarray(self.words)
-        self.wordinds.clear()
-        for i in range(len(self.words)):
-            self.wordinds[self.words[i]] = i
-        self.taginds.clear()
-        for i in range(len(self.tags)):
-            self.taginds[self.tags[i]] = i
-        mappedWords = []
-        mappedTags = []
-        for sent in sentences:
-            mappedWords.append([]);mappedTags.append([])
-            for (word,tag) in sent:
-                mappedWords[-1].append(self.featuresOf(word))
-                mappedTags[-1].append(self.taginds[tag])
-        return mappedWords,mappedTags
-    def get_mapped_sentences_test(self, sents):
-        corpus = sents
-        sentences = [sent for sent in corpus]
-        sentences = self.preProcSents(sentences, False)
-        mapped_sentences = [[ self.featuresOf(self.wordinds[a]) for a in sent] for sent in sentences]
-        return mapped_sentences
-    def saveTagger(self):
+    def saveTagger(self,model:nn.Module):
         np.save("trained/emmis", self.emmis)
         np.save("trained/trellis", self.trellis)
         np.save("trained/init_prob", self.init_freqs)
@@ -375,7 +352,6 @@ class Tagger:
             ))
             POStagger = Tagger()
             POStagger.trainOn(trainSents)
-            POStagger.saveTagger()
             predTags = POStagger.testOn(testSentsOnlyWords)
             
             confmat, acc, pposa = POStagger.evalMetrics(predTags,testSentsOnlyTags)
@@ -392,6 +368,8 @@ class Tagger:
         np.savetxt('results/accuracy.csv',res)
         return res
 if __name__=='__main__':
-    Tagger.findEvalMetrics(5)
-
-    # tagger.saveTagger()
+    t = Tagger()
+    sents = list(brown.tagged_sents(tagset="universal"))
+    k = 5
+    sents = sents[:int(len(sents)/k)]
+    t.trainOn(sents)
