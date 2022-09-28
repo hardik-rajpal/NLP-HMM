@@ -3,7 +3,33 @@ import matplotlib.pyplot as plt
 import numpy as np
 import re
 from nltk.corpus import brown
+import torch.nn as nn 
+import torch
+"""
+Train Order:
+1. get corpus from nltk. list[list[tuple[str]]]
+2. get words, tags separated into lists. list[list[str]], list[list[str]]
+3. tags => taginds. list[list[int]] => tagvectors list[list[list[int]]]
+4. words => word-feature-vectors. list[list[list[float]]]
+5. train model.
+"""
+AMT = '$amt$'
+QNW = '$qnw$'
+class Network(nn.Module):
+    def __init__(self, lyrszs:list[int]):
+        #lyrszs[0] = 12 (#features)
+        #lyrszs[-1] = 12 (#tags)
+        self.layers = []
+        for i in range(1,len(lyrszs)):
+            self.layers.append(nn.Linear(lyrszs[i-1],lyrszs[i]))
+            self.layers.append(nn.Sigmoid())
+    def forward(self,X:list[int]):
+        for layer in self.layers:
+            X = layer(X)
+        return X
+
 class Tagger:
+    NUMTAGS = 12
     isAmount = lambda word:(re.compile('\W[\d,.]+').match(word)!=None)
     isQualNum = lambda word:(re.compile('[\d\w,-/]*\d[\d\w,-/]*').match(word)!=None)
     def __init__(self):
@@ -13,6 +39,17 @@ class Tagger:
         self.taginds = {}#dictionary mapping tags to indices in tags.
         self.init_freqs = []
         self.freqMap = {}
+        self.prefixes = ['re','un','de','co','']
+        self.suffixes = ['ed','ly','ies','s','es','ied','']
+        self.prefixes = sorted(self.prefixes,key=lambda s:-len(s))
+        self.suffixes = sorted(self.suffixes,key=lambda s:-len(s))
+        self.prefinds = {}
+        self.suffinds = {}
+        for i,pref in enumerate(self.prefixes):
+            self.prefinds[pref] = i
+        for i,suff in enumerate(self.suffixes):
+            self.suffinds[suff] = i
+        
     def initializeTrellisAndEmmis(self):
         """Initializes Trellis and Emmis to arrays of appropriate dimensions.
         """
@@ -74,10 +111,104 @@ class Tagger:
         ppos.append(pposr)
         ppos.append(pposf1)
         return confmat,accuracy,np.array(ppos)
+    def prefindex(self,word:str):
+        for i in range(1,len(word)):
+            if(self.prefinds.__contains__(word[:i])):
+                return self.prefinds[word[:i]]
+        return 0
+    def suffindex(self,word):
+        for i in range(1,len(word)):
+            if(self.suffinds.__contains__(word[-i:])):
+                return self.suffinds[word[-i:]]
+        return 0
+    def featuresOf(self,j,sent,word:str):
+        prevword = '' if j==0 else sent[j-1]
+        nextword = '' if j+1==len(sent) else sent[j+1]
+        isnumeric = 1 if sent[j] == AMT or sent[j] == QNW else 0
+        iscapitalized = 0
+        isallcapitalized = 0
+        if isnumeric == 0:
+            if ((word.lower()!=sent[j])):
+                iscapitalized = 1
+            elif(word.upper()==word):
+                isallcapitalized = 1
+        return (np.array([
+            self.wordinds[sent[j]], #word
+            1 if j==0 else 0,#is_first
+            1 if j==len(sent)-1 else 0,#is_last
+            self.wordinds[prevword],#prev_word
+            self.wordinds[nextword],#next_word
+            0 if isnumeric else self.prefindex(sent[j]),#prefix-index
+            0 if isnumeric else self.suffindex(sent[j]),#suffix-index
+            isnumeric,#isnumeric
+            iscapitalized,#iscapitalized
+            isallcapitalized,#isallcapitalized
+        ]))
+    def wordsToFeatures(self,words:list[list[int]]):
+        featuredWords:list[list[list[float]]] = []
+        for wordlist in words:
+            featuredWords.append([])
+            for i in range(len(wordlist)):
+                featuredWords[-1].append(self.featuresOf(wordlist[i]))
+    def trainNetwork(self,featured_sents,featured_sents_tags):
+        pass
+    def separateWordsTags(self,mapped_sents):
+        words:list[list[str]] = []
+        tags:list[list[str]] = []
+        for sent in mapped_sents:
+            words.append([]);tags.append([])
+            for (word,tag) in sent:
+                words[-1].append(word)
+                tags[-1].append(tag)
+        
+        return words,tags
+    def mapTagsToInds(self,tags):
+        tagset = set()
+        for tagsent in tags:
+            for tag in tagsent:
+                tagset.add(tag)
+            if(len(tagset)==Tagger.NUMTAGS):
+                break
+        tagset = list(tagset)
+        self.taginds.clear()
+        for i,tag in enumerate(tagset):
+            self.taginds[tag] = i
+        mappedTags = []
+        for tagsent in tags:
+            mappedTags.append([])
+            for i in range(len(tagsent)):
+                mappedTags[-1].append(self.taginds[tagsent[i]])
+        return mappedTags
+    def mapWordsToFVs(self,words):
+        allwords = []
+        preprocwords = self.preProcSents(words)
+        for sent in preprocwords:
+            allwords.extend(sent)
+        allwords.extend(['*',''])
+        allwords = np.asarray(allwords)
+        uniqwords = np.unique(allwords)
+        self.wordinds.clear()
+        for i in range(len(uniqwords)):
+            self.wordinds[uniqwords[i]] = i
+        featvects = []
+        for i in range(len(preprocwords)):
+            featvects.append([])
+            for j in range(len(preprocwords[i])):
+                featvects[-1].append(self.featuresOf(j,preprocwords[i],words[i][j]))
+        return featvects
     def trainOn(self, trainSents):
-        mapped_sents,leastFreqWords = self.get_mapped_sentences(trainSents)
-        self.initializeTrellisAndEmmis()
-        self.updateTrellisAndEmmis(mapped_sents,leastFreqWords)
+        words,tags = self.separateWordsTags(trainSents)
+        featwords = self.mapWordsToFVs(words)
+        taginds = self.mapTagsToInds(tags)
+        collapsed_featwords = []
+        collapsed_taginds = []
+        for i in range(len(featwords)):
+            collapsed_featwords.extend(featwords[i])
+            collapsed_taginds.extend(taginds[i])
+        print(collapsed_featwords[:2])
+        print(collapsed_taginds[:2])
+        return
+        self.trainNetwork(collapsed_featwords,collapsed_taginds)
         self.saveTagger()
     def testOn(self, testSents):
         mapped_sents = self.get_mapped_sentences_test(testSents)
@@ -88,24 +219,23 @@ class Tagger:
         return answer
     def preProcSents(self,sents, train=True):
         if train==True:
-            # qualtags = []
             for i in range(len(sents)):
                 for j in range(len(sents[i])):
-                    word = list(sents[i][j])
-                    word[0] = word[0].lower()
-                    if(Tagger.isAmount(word[0])):
-                        word[0] = '$amt$'
-                    if(Tagger.isQualNum(word[0])):
-                        word[0] = f'$qnw$'
+                    word = sents[i][j]
+                    word = word.lower()
+                    if(Tagger.isAmount(word)):
+                        word = AMT
+                    if(Tagger.isQualNum(word)):
+                        word = QNW
                     sents[i][j] = word
         else:
             for i in range(len(sents)):
                 for j in range(len(sents[i])):
                     word = sents[i][j].lower()
                     if(Tagger.isAmount(word)):
-                        word = '$amt$'
+                        word = AMT
                     if(Tagger.isQualNum(word)):
-                        word = f'$qnw$'
+                        word = QNW
                     if (not self.wordinds.__contains__(word)):
                         word = '*'
                     sents[i][j] = word
@@ -126,8 +256,8 @@ class Tagger:
         freqThres = 2
         for i in range(len(counts)):
             self.freqMap[words[i]] = counts[i]
-        leastFreqWords = words[counts<=freqThres].tolist()
-        leastFreqWords = []
+        # leastFreqWords = words[counts<=freqThres].tolist()
+        # leastFreqWords = []
         self.tags = tags
         self.words = words.tolist()
         self.words.append('*')
@@ -138,15 +268,19 @@ class Tagger:
         self.taginds.clear()
         for i in range(len(self.tags)):
             self.taginds[self.tags[i]] = i
-        
-        mapped_sentences = [[ [self.wordinds[a], self.taginds[b]] for a, b in sent] for sent in sentences]
-
-        return mapped_sentences,leastFreqWords
+        mappedWords = []
+        mappedTags = []
+        for sent in sentences:
+            mappedWords.append([]);mappedTags.append([])
+            for (word,tag) in sent:
+                mappedWords[-1].append(self.featuresOf(word))
+                mappedTags[-1].append(self.taginds[tag])
+        return mappedWords,mappedTags
     def get_mapped_sentences_test(self, sents):
         corpus = sents
         sentences = [sent for sent in corpus]
         sentences = self.preProcSents(sentences, False)
-        mapped_sentences = [[ self.wordinds[a] for a in sent] for sent in sentences]
+        mapped_sentences = [[ self.featuresOf(self.wordinds[a]) for a in sent] for sent in sentences]
         return mapped_sentences
     def saveTagger(self):
         np.save("trained/emmis", self.emmis)
