@@ -1,4 +1,5 @@
 from time import time
+from typing import List
 import matplotlib.pyplot as plt
 import numpy as np
 import re
@@ -16,21 +17,38 @@ Train Order:
 AMT = '$amt$'
 QNW = '$qnw$'
 ###Model related data:
-layerszs = [12]
-MAX_EPOCHS = 50
+hiddenLayers = [96]
+MAX_EPOCHS = 20
+NUMTAGS = 12
 BATCHSZ = 256
+LOSSFN = 'CEL'
+MINETYLEN = 5
 lr = 0.01
- 
+###Fine tuning detes:
+"""
+(loss = TSS)
+BS, layrszs => acc of saturation on train set.
+[]=> 29% 
+[24]=> max acc = 38, most values are 29%
+256, [48]=> max acc = ...
+(loss = CEL)
+
+[]=>15% ... then 29%.
+
+"""
+### 
 class Network(nn.Module):
-    def __init__(self, lyrszs:list[int]):
+    def __init__(self, lyrszs:List[int],useCEL):
         #lyrszs[0] = 12 (#features)
         #lyrszs[-1] = 12 (#tags)
         super(Network, self).__init__()
         self.layers = nn.ModuleList()
+        self.useCEL = useCEL
         for i in range(1,len(lyrszs)):
             self.layers.append(nn.Linear(lyrszs[i-1],lyrszs[i]))
-            self.layers.append(nn.Softmax(1))
-    def forward(self,X:list[int]):
+            self.layers.append(nn.ReLU())
+        self.layers.append(nn.Softmax(1))
+    def forward(self,X:List[int]):
         for layer in self.layers:
             X = layer(X)
         return X
@@ -38,12 +56,15 @@ class Network(nn.Module):
         labvects = torch.zeros_like(predvects)
         for x in list(zip(torch.tensor(np.arange(len(labels),dtype=int),dtype=torch.long),labels.type(torch.long))):
             labvects[x[0],x[1]] = 1
+        if(self.useCEL):
+            return nn.CrossEntropyLoss()(predvects,labvects)
         losses = (labvects-predvects)**2
         return torch.mean(torch.sum(losses,1))
-    def accuracy(self,predvects,labels):
+    def accuracy(self,predvects:torch.Tensor,labels:torch.Tensor):
+        np.savetxt('preds.csv',predvects.detach().numpy())
+        np.savetxt('labsel.txt',labels.numpy(),fmt='%d')
         return np.round(100*(labels[torch.argmax(predvects,1)==labels].shape[0]/labels.shape[0]),2)
 class Tagger:
-    NUMTAGS = 12
     isAmount = lambda word:(re.compile('\W[\d,.]+').match(word)!=None)
     isQualNum = lambda word:(re.compile('[\d\w,-/]*\d[\d\w,-/]*').match(word)!=None)
     def __init__(self):
@@ -63,6 +84,7 @@ class Tagger:
             self.prefinds[pref] = i
         for i,suff in enumerate(self.suffixes):
             self.suffinds[suff] = i
+        self.emmis = None #set pre training
         self.model = None # set to a nn.Module object after training.
     def evalMetrics(self,preds,trueTags):
         #unpack all preds,tags sentences into one array:
@@ -89,45 +111,71 @@ class Tagger:
         ppos.append(pposr)
         ppos.append(pposf1)
         return confmat,accuracy,np.array(ppos)
-    def prefindex(self,word:str):
-        for i in range(1,len(word)):
-            if(self.prefinds.__contains__(word[:i])):
-                return self.prefinds[word[:i]]
+    def prefindex(self,word:str,numprefs:int):
+        prefs = []
+        if(not (self.isnumeric(word) or len(word)<MINETYLEN)):
+            for i in range(1,len(word)):
+                if(self.prefinds.__contains__(word[:i])):
+                    prefs.append(self.prefinds[word[:i]])
+                    if(len(prefs)==numprefs):
+                        break
+        while(len(prefs)<numprefs):
+            prefs.append(-1)
+        return prefs
+    def suffindex(self,word:str,numsuffs:int):
+        suffs = []
+        if(not (self.isnumeric(word) or len(word)<MINETYLEN)):
+            for i in range(1,len(word)):
+                if(self.suffinds.__contains__(word[-i:])):
+                    suffs.append(self.suffinds[word[-i:]])
+                    if(len(suffs)==numsuffs):
+                        break
+        while(len(suffs)<numsuffs):
+            suffs.append(0)
         return 0
-    def suffindex(self,word):
-        for i in range(1,len(word)):
-            if(self.suffinds.__contains__(word[-i:])):
-                return self.suffinds[word[-i:]]
-        return 0
-    def featuresOf(self,j,sent,word:str):
+    def isnumeric(self,word):
+        isnumeric = 1 if word == AMT or word == QNW else 0
+        return isnumeric
+    def featuresOf(self,j,sent,word:str,prevtag:int,tagprobs:np.ndarray):
         prevword = '' if j==0 else sent[j-1]
         nextword = '' if j+1==len(sent) else sent[j+1]
-        isnumeric = 1 if sent[j] == AMT or sent[j] == QNW else 0
+        isnumeric = self.isnumeric(sent[j])
         iscapitalized = 0
         isallcapitalized = 0
+        isalllower = -1
         if isnumeric == 0:
-            if ((word.lower()!=sent[j])):
+            if ((word[0]!=word[0].lower())):
                 iscapitalized = 1
-            elif(word.upper()==word):
+            if(word.upper()==word):
                 isallcapitalized = 1
+            if(word.lower()==word):
+                isalllower = 1
+            else:
+                isalllower = 0
         return (np.array([
+            len(sent),#length of sentence
             self.wordinds[sent[j]], #word
             1 if j==0 else 0,#is_first
             1 if j==len(sent)-1 else 0,#is_last
+            iscapitalized,#iscapitalized
+            isallcapitalized,#isallcapitalized,
+            isalllower,
+            prevtag,#tag of word behind me
+            *self.prefindex(sent[j],3),#prefix-index
+            *self.suffindex(sent[j],3),#suffix-index
             self.wordinds[prevword],#prev_word
             self.wordinds[nextword],#next_word
-            0 if isnumeric else self.prefindex(sent[j]),#prefix-index
-            0 if isnumeric else self.suffindex(sent[j]),#suffix-index
-            isnumeric,#isnumeric
-            iscapitalized,#iscapitalized
-            isallcapitalized,#isallcapitalized
+            # isnumeric,#isnumeric
+            # -2 if j==0 else self.prefindex(sent[j-1]),
+            # -2 if j==len(sent)-1 else self.suffindex(sent[j+1]),
+            # *(tagprobs.tolist())
         ]))
     def getBatch(self,trainX:torch.Tensor,trainY:torch.Tensor):
         N = trainX.shape[0]
         perm = torch.randperm(N)
         trainX = trainX[perm]
         trainY = trainY[perm]
-        for i in range(BATCHSZ,N,BATCHSZ):
+        for i in range(0,N,BATCHSZ):
             yield trainX[i:i+BATCHSZ],trainY[i:i+BATCHSZ] 
     def plot(self,val_accs, losses):
         """
@@ -149,10 +197,10 @@ class Tagger:
         plt.plot(losses)
         plt.xticks(fontsize=16)
         plt.yticks(fontsize=16)
-        plt.show()
+        plt.savefig('erracc.png')
 
     def trainNetwork(self,trainX:torch.Tensor,trainY:torch.Tensor):
-        model = Network([trainX[0].shape[0],*layerszs,Tagger.NUMTAGS])
+        model = Network([trainX[0].shape[0],*hiddenLayers,NUMTAGS],LOSSFN=='CEL')
         losses = []
         accs = []
         opt = torch.optim.SGD(model.parameters(),lr=lr)
@@ -160,7 +208,7 @@ class Tagger:
             model.train()
             totalloss = 0
             totalacc = 0
-            print(f'Numiters: {int(trainX.shape[0]/BATCHSZ)}, #insts: {trainX.shape[0]}')
+            print(f'Epoch: {i}/{MAX_EPOCHS}; Numiters: {int(trainX.shape[0]/BATCHSZ)}, #insts: {trainX.shape[0]}')
             for trainXSample,trainYSample in self.getBatch(trainX,trainY):
                 # print(trainXSample.shape,trainYSample.shape)
                 # continue
@@ -168,11 +216,10 @@ class Tagger:
                 predVects = model(trainXSample)
                 loss = model.loss(predVects,trainYSample)
                 totalloss+=loss.item()
-                totalacc+=(model.accuracy(predVects,trainYSample))
                 loss.backward()
                 opt.step()
             totalloss/=int(trainX.shape[0]/BATCHSZ)
-            totalacc/=int(trainX.shape[0]/BATCHSZ)
+            totalacc = model.accuracy(model(trainX),trainY)
             accs.append(totalacc)
             losses.append(totalloss)
             print(f'acc: {totalacc}; loss:{totalloss}')
@@ -192,7 +239,7 @@ class Tagger:
         for tagsent in tags:
             for tag in tagsent:
                 tagset.add(tag)
-            if(len(tagset)==Tagger.NUMTAGS):
+            if(len(tagset)==NUMTAGS):
                 break
         tagset = list(tagset)
         self.taginds.clear()
@@ -204,11 +251,13 @@ class Tagger:
             for i in range(len(tagsent)):
                 mappedTags[-1].append(self.taginds[tagsent[i]])
         return mappedTags
-    def mapWordsToFVs(self,words,train=True):
+    def mapWordsToFVsTrain(self,words,tags):
         allwords = []
-        preprocwords = self.preProcSents(words,train)
-        for sent in preprocwords:
+        alltags = []
+        preprocwords = self.preProcSents(words,True)
+        for sent,tagsent in zip(preprocwords,tags):
             allwords.extend(sent)
+            alltags.extend(tagsent)
         allwords.extend(['*',''])
         allwords = np.asarray(allwords)
         uniqwords = np.unique(allwords)
@@ -216,25 +265,30 @@ class Tagger:
         for i in range(len(uniqwords)):
             self.wordinds[uniqwords[i]] = i
         featvects = []
+        self.emmis = np.ones((len(uniqwords),NUMTAGS))
+        for i in range(len(preprocwords)):
+            for j in range(len(preprocwords[i])):
+                self.emmis[self.wordinds[preprocwords[i][j]],tags[i][j]]+=1
         for i in range(len(preprocwords)):
             featvects.append([])
             for j in range(len(preprocwords[i])):
-                featvects[-1].append(self.featuresOf(j,preprocwords[i],words[i][j]))
+                prevtag = -1 if j==0 else tags[i][j-1]
+                featvects[-1].append(self.featuresOf(j,preprocwords[i],words[i][j],prevtag,self.emmis[self.wordinds[preprocwords[i][j]]]))
         return featvects
     def trainOn(self, trainSents):
         words,tags = self.separateWordsTags(trainSents)
-        featwords = self.mapWordsToFVs(words)
         taginds = self.mapTagsToInds(tags)
+        featwords = self.mapWordsToFVsTrain(words,taginds)
         collapsed_featwords = []
         collapsed_taginds = []
         for i in range(len(featwords)):
             collapsed_featwords.extend(featwords[i])
             collapsed_taginds.extend(taginds[i])
-        model = self.trainNetwork(torch.tensor(np.array(collapsed_featwords,dtype=np.float32)),torch.tensor(np.array(collapsed_taginds,dtype=np.float32)))
+        model = self.trainNetwork(torch.tensor(np.array(collapsed_featwords),dtype=torch.float),torch.tensor(np.array(collapsed_taginds),dtype=torch.float))
         self.model = model
         # self.saveTagger(model)
     def testOn(self, testSents):
-        featwords = self.mapWordsToFVs(testSents,False)
+        featwords = self.mapWordsToFVsTrain(testSents,False)
         answer = []
         for i in range(len(featwords)):
             tags = []
@@ -370,6 +424,6 @@ class Tagger:
 if __name__=='__main__':
     t = Tagger()
     sents = list(brown.tagged_sents(tagset="universal"))
-    k = 5
+    k = 10
     sents = sents[:int(len(sents)/k)]
     t.trainOn(sents)
