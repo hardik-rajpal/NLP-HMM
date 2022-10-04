@@ -17,7 +17,8 @@ Train Order:
 AMT = '$amt$'
 QNW = '$qnw$'
 ###Model related data:
-hiddenLayers = [96]
+hiddenLayers = [512]
+SEED_VALUE = 4
 MAX_EPOCHS = 20
 NUMTAGS = 12
 BATCHSZ = 256
@@ -44,10 +45,18 @@ class Network(nn.Module):
         super(Network, self).__init__()
         self.layers = nn.ModuleList()
         self.useCEL = useCEL
-        for i in range(1,len(lyrszs)):
-            self.layers.append(nn.Linear(lyrszs[i-1],lyrszs[i]))
-            self.layers.append(nn.ReLU())
+        self.layers.append(nn.Linear(lyrszs[0],lyrszs[1]))
+        self.layers.append(nn.ReLU())
+        self.layers.append(nn.Dropout(0.2))
+        # self.layers.append(nn.Linear(lyrszs[1],lyrszs[1]))
+        # self.layers.append(nn.ReLU())
+        # self.layers.append(nn.Dropout(0.2))
+        self.layers.append(nn.Linear(lyrszs[1],lyrszs[2]))
         self.layers.append(nn.Softmax(1))
+        # for i in range(1,len(lyrszs)):
+        #     self.layers.append(nn.Linear(lyrszs[i-1],lyrszs[i]))
+        #     self.layers.append(nn.ReLU())
+        # self.layers.append(nn.Softmax(1))
     def forward(self,X:List[int]):
         for layer in self.layers:
             X = layer(X)
@@ -132,7 +141,7 @@ class Tagger:
                         break
         while(len(suffs)<numsuffs):
             suffs.append(0)
-        return 0
+        return suffs
     def isnumeric(self,word):
         isnumeric = 1 if word == AMT or word == QNW else 0
         return isnumeric
@@ -330,42 +339,6 @@ class Tagger:
         self.logemissionProbs = np.log10((self.emmis * (1 / np.tile(np.sum(self.emmis, 0), (len(self.words), 1)))).T)
         self.logtransitionProbs = np.log10(self.trellis * (1 / np.tile(np.sum(self.trellis, 1).reshape((len(self.tags), 1)), (1, len(self.tags)))))
         self.loginit_probs = np.log10(self.init_freqs/ np.sum(self.init_freqs))
-    def viterbi(self, wordlist):
-        states = np.arange(len(self.tags))
-        wordlist = np.asarray(wordlist)
-        logemissionProbs = np.log10((self.emmis * (1 / np.tile(np.sum(self.emmis, 0), (len(self.words), 1)))).T)
-        logtransitionProbs = np.log10(self.trellis * (1 / np.tile(np.sum(self.trellis, 1).reshape((len(self.tags), 1)), (1, len(self.tags)))))
-        loginit_probs = np.log10(self.init_freqs/ np.sum(self.init_freqs))
-        V = np.zeros((len(wordlist),len(states),2))
-        V[0] = np.tile(
-            (
-                (np.array([loginit_probs.flatten()+(logemissionProbs[:,wordlist[0]]).flatten()]))
-            ).T,
-            reps=2)
-        for t in range(1, len(wordlist)):
-            constvt1 = np.tile(np.array([V[t-1][:,0].flatten()]).T,len(states))
-            vals = constvt1+logtransitionProbs # 12x12
-            stateSel = np.argmax(vals,0).flatten()
-            transProbMax = np.max(vals,0).flatten()+logemissionProbs[:,wordlist[t]].flatten()
-            V[t] = np.stack([transProbMax,stateSel],1)
-        maxProb = -1000
-        previousState = None
-        outputs = []
-        maxProbInd = np.argmax(V[-1,:,0])
-        previousState = int(V[-1,:,1][maxProbInd])
-        maxProbVal = V[-1,:,0][maxProbInd]
-        if (maxProbVal<maxProb):
-            print("Probability is 0")
-            return []
-        outputs.append(maxProbInd)
-        for t in range(len(V) - 2, -1, -1):
-            outputs.insert(0, V[t + 1][previousState][1])
-            previousState = int(V[t + 1][previousState][1])
-        for i in range(len(outputs)):
-            outputs[i] = self.tags[int(outputs[i])]
-        # print(' '.join(list(map(lambda w,t: f'{w}_{t}',list(map(lambda x:(self.words[x]),Y.tolist())),outputs))))
-        # exit()
-        return outputs
     def demoSent(self,sent):
         sent2 = sent[:].split(' ')
         tags = self.testOn([sent.split(' ')])[0]
@@ -422,6 +395,8 @@ class Tagger:
         np.savetxt('results/accuracy.csv',res)
         return res
 if __name__=='__main__':
+    np.random.seed(SEED_VALUE)
+    torch.manual_seed(SEED_VALUE)
     t = Tagger()
     sents = list(brown.tagged_sents(tagset="universal"))
     k = 10
