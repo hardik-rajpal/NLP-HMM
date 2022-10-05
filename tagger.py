@@ -1,10 +1,12 @@
 from time import time
+from typing import List
 import matplotlib.pyplot as plt
 import numpy as np
 import re
-from nltk.corpus import brown
+from nltk.corpus import brown,treebank
 import torch.nn as nn 
 import torch
+import gensim
 """
 Train Order:
 1. get corpus from nltk. list[list[tuple[str]]]
@@ -16,13 +18,14 @@ Train Order:
 AMT = '$amt$'
 QNW = '$qnw$'
 ###Model related data:
-layerszs = [12]
-MAX_EPOCHS = 50
+layerszs = [256,24]
+MAX_EPOCHS = 20
 BATCHSZ = 256
+W2VLEN = 100
 lr = 0.01
  
 class Network(nn.Module):
-    def __init__(self, lyrszs:list[int]):
+    def __init__(self, lyrszs:List[int]):
         #lyrszs[0] = 12 (#features)
         #lyrszs[-1] = 12 (#tags)
         super(Network, self).__init__()
@@ -30,7 +33,7 @@ class Network(nn.Module):
         for i in range(1,len(lyrszs)):
             self.layers.append(nn.Linear(lyrszs[i-1],lyrszs[i]))
             self.layers.append(nn.Softmax(1))
-    def forward(self,X:list[int]):
+    def forward(self,X:List[int]):
         for layer in self.layers:
             X = layer(X)
         return X
@@ -64,6 +67,7 @@ class Tagger:
         for i,suff in enumerate(self.suffixes):
             self.suffinds[suff] = i
         self.model = None # set to a nn.Module object after training.
+        self.word2vec = None
     def evalMetrics(self,preds,trueTags):
         #unpack all preds,tags sentences into one array:
         for i in range(1,len(preds)):
@@ -99,7 +103,23 @@ class Tagger:
             if(self.suffinds.__contains__(word[-i:])):
                 return self.suffinds[word[-i:]]
         return 0
+    def getw2vvector(self,word:str):
+        if(self.word2vecinds.__contains__(word)):
+            return self.wordVectors[self.word2vecinds[word]].tolist()
+        return self.unkownwordvect.tolist()
     def featuresOf(self,j,sent,word:str):
+        if(self.word2vec!=None):
+            arr = []
+            if(j==0):
+                arr.extend(np.zeros((W2VLEN,)).tolist())
+            else:
+                arr.extend(self.getw2vvector(sent[j-1]))
+            arr.extend(self.getw2vvector(sent[j]))
+            if(j==len(sent)-1):
+                arr.extend(np.zeros((W2VLEN,)).tolist())
+            else:
+                arr.extend(self.getw2vvector(sent[j+1]))
+            return np.array(arr)
         prevword = '' if j==0 else sent[j-1]
         nextword = '' if j+1==len(sent) else sent[j+1]
         isnumeric = 1 if sent[j] == AMT or sent[j] == QNW else 0
@@ -209,6 +229,8 @@ class Tagger:
         preprocwords = self.preProcSents(words,train)
         for sent in preprocwords:
             allwords.extend(sent)
+        if(self.word2vec==None):
+            self.trainWord2Vec(preprocwords)
         allwords.extend(['*',''])
         allwords = np.asarray(allwords)
         uniqwords = np.unique(allwords)
@@ -221,7 +243,14 @@ class Tagger:
             for j in range(len(preprocwords[i])):
                 featvects[-1].append(self.featuresOf(j,preprocwords[i],words[i][j]))
         return featvects
+    def trainWord2Vec(self,words):
+        self.word2vec = gensim.models.Word2Vec(words,min_count = 1, vector_size = W2VLEN, window = 5)
+        self.wordVectors = self.word2vec.wv.vectors
+        self.word2vecinds = self.word2vec.wv.key_to_index
+        self.unkownwordvect = np.mean(self.wordVectors,1)
+        
     def trainOn(self, trainSents):
+
         words,tags = self.separateWordsTags(trainSents)
         featwords = self.mapWordsToFVs(words)
         taginds = self.mapTagsToInds(tags)
@@ -230,6 +259,7 @@ class Tagger:
         for i in range(len(featwords)):
             collapsed_featwords.extend(featwords[i])
             collapsed_taginds.extend(taginds[i])
+        print(f' shape of word vectors: {collapsed_featwords[0].shape}')
         model = self.trainNetwork(torch.tensor(np.array(collapsed_featwords,dtype=np.float32)),torch.tensor(np.array(collapsed_taginds,dtype=np.float32)))
         self.model = model
         # self.saveTagger(model)
@@ -369,7 +399,8 @@ class Tagger:
         return res
 if __name__=='__main__':
     t = Tagger()
-    sents = list(brown.tagged_sents(tagset="universal"))
-    k = 5
-    sents = sents[:int(len(sents)/k)]
+    corpus = brown
+    sents = list(corpus.tagged_sents(tagset="universal"))
+    trr = 0.2
+    sents = sents[:int(len(sents)*trr)]
     t.trainOn(sents)
