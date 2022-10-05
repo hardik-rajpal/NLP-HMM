@@ -1,8 +1,9 @@
 from time import time
+from typing import List
 import matplotlib.pyplot as plt
 import numpy as np
 import re
-from nltk.corpus import brown
+from nltk.corpus import brown,treebank
 import torch.nn as nn 
 import torch
 """
@@ -22,15 +23,16 @@ BATCHSZ = 256
 lr = 0.01
  
 class Network(nn.Module):
-    def __init__(self, lyrszs:list[int]):
+    def __init__(self, lyrszs:List[int]):
         #lyrszs[0] = 12 (#features)
         #lyrszs[-1] = 12 (#tags)
         super(Network, self).__init__()
         self.layers = nn.ModuleList()
         for i in range(1,len(lyrszs)):
             self.layers.append(nn.Linear(lyrszs[i-1],lyrszs[i]))
-            self.layers.append(nn.Softmax(1))
-    def forward(self,X:list[int]):
+            self.layers.append(nn.ReLU())
+        self.layers.append(nn.Softmax(1))
+    def forward(self,X:List[int]):
         for layer in self.layers:
             X = layer(X)
         return X
@@ -89,16 +91,38 @@ class Tagger:
         ppos.append(pposr)
         ppos.append(pposf1)
         return confmat,accuracy,np.array(ppos)
-    def prefindex(self,word:str):
-        for i in range(1,len(word)):
-            if(self.prefinds.__contains__(word[:i])):
-                return self.prefinds[word[:i]]
-        return 0
-    def suffindex(self,word):
-        for i in range(1,len(word)):
-            if(self.suffinds.__contains__(word[-i:])):
-                return self.suffinds[word[-i:]]
-        return 0
+    def prefindex(self,word:str,isnumeric,onehot=False):
+        if(onehot):
+            if(isnumeric):
+                return np.zeros((len(self.prefixes),)).tolist()
+            for i in range(1,len(word)):
+                if(self.prefinds.__contains__(word[:i])):
+                    arr = np.zeros((len(self.prefixes),)).tolist()
+                    arr[self.prefinds[word[:i]]] = 1
+                    return arr
+            return np.zeros((len(self.prefixes),)).tolist()
+        else:
+            if(isnumeric):return 0
+            for i in range(1,len(word)):
+                if(self.prefinds.__contains__(word[:i])):
+                    return self.prefinds[word[:i]]
+            return 0
+    def suffindex(self,word,isnumeric,onehot=False):
+        if(onehot):
+            if(isnumeric):
+                return np.zeros((len(self.suffixes),)).tolist()
+            for i in range(1,len(word)):
+                if(self.suffinds.__contains__(word[-i:])):
+                    arr = np.zeros((len(self.suffixes),)).tolist()
+                    arr[self.suffinds[word[-i:]]] = 1
+                    return arr
+            return np.zeros((len(self.suffixes),)).tolist()
+        else:
+            if(isnumeric):return 0
+            for i in range(1,len(word)):
+                if(self.suffinds.__contains__(word[-i:])):
+                    return self.suffinds[word[-i:]]
+            return 0
     def featuresOf(self,j,sent,word:str):
         prevword = '' if j==0 else sent[j-1]
         nextword = '' if j+1==len(sent) else sent[j+1]
@@ -116,11 +140,11 @@ class Tagger:
             1 if j==len(sent)-1 else 0,#is_last
             self.wordinds[prevword],#prev_word
             self.wordinds[nextword],#next_word
-            0 if isnumeric else self.prefindex(sent[j]),#prefix-index
-            0 if isnumeric else self.suffindex(sent[j]),#suffix-index
-            isnumeric,#isnumeric
             iscapitalized,#iscapitalized
             isallcapitalized,#isallcapitalized
+            isnumeric,#isnumeric
+            *self.prefindex(sent[j],isnumeric,True),#prefix-index
+            *self.suffindex(sent[j],isnumeric,True)#suffix-index
         ]))
     def getBatch(self,trainX:torch.Tensor,trainY:torch.Tensor):
         N = trainX.shape[0]
@@ -149,7 +173,8 @@ class Tagger:
         plt.plot(losses)
         plt.xticks(fontsize=16)
         plt.yticks(fontsize=16)
-        plt.show()
+        plt.savefig('erracc.png')
+        # plt.show()
 
     def trainNetwork(self,trainX:torch.Tensor,trainY:torch.Tensor):
         model = Network([trainX[0].shape[0],*layerszs,Tagger.NUMTAGS])
@@ -230,6 +255,7 @@ class Tagger:
         for i in range(len(featwords)):
             collapsed_featwords.extend(featwords[i])
             collapsed_taginds.extend(taginds[i])
+        print(collapsed_featwords[0].shape)
         model = self.trainNetwork(torch.tensor(np.array(collapsed_featwords,dtype=np.float32)),torch.tensor(np.array(collapsed_taginds,dtype=np.float32)))
         self.model = model
         # self.saveTagger(model)
@@ -369,7 +395,9 @@ class Tagger:
         return res
 if __name__=='__main__':
     t = Tagger()
-    sents = list(brown.tagged_sents(tagset="universal"))
-    k = 5
-    sents = sents[:int(len(sents)/k)]
+    corpus = brown
+    corpus = treebank
+    sents = list(corpus.tagged_sents(tagset="universal"))
+    trr = 0.6
+    sents = sents[:int(len(sents)*trr)]
     t.trainOn(sents)
