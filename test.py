@@ -1,8 +1,10 @@
 import torch
 import numpy as np
-a = np.array([[0.1,0.8,0.1,0],[0.7,0.2,0.1,0]])
-b = np.array([0,1])
+a,b=[[0.2,0.1,0.7],[0.01,0.92,0.07]],[[1,0,0],[0,1,0]]
+a = torch.tensor(np.array(a))
+b = torch.tensor(np.array(b))
+
 
 from tagger import Network
-m = Network([1,2,3])
-print(m.loss(torch.tensor(a),torch.tensor(b)))
+m = Network([1,2,3,3],True)
+print(m.loss(a,b))
