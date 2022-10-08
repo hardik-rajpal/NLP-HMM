@@ -255,14 +255,13 @@ class Tagger:
         return self.transformer
     def mapWordsToFVsTrain(self,words,isTrain=True):
         preprocwords = self.preProcSents(words,isTrain)
-        preprocwords = words
+        # preprocwords = words
         featvects = []
         for i in range(len(preprocwords)):
             featvects.append([])
             for j in range(len(preprocwords[i])):
                 # prevtag = -1 if j==0 else tags[i][j-1]
                 featvects[-1].append(self.featuresOf(j,preprocwords[i],words[i][j]))
-        
         return featvects
     def getTrainableData(self, trainSents):
         words,tags = self.separateWordsTags(trainSents)
