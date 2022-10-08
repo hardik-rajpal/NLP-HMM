@@ -358,7 +358,6 @@ class Tagger:
             res.append(acc)
             print(f'Time for iteration {i+1}: {time() - now}')
             now = time()
-            break
         POStagger.network.plotmodel()
         np.savetxt('results/perposmetrics.csv',np.mean(allitersppos,0),fmt='%.2f')
         np.savetxt('results/accuracy.csv',100*np.array(res),fmt='%.2f')

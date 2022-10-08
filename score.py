@@ -5,9 +5,10 @@ freqs = freqs.tolist()
 freqs.append(0)
 freqs = np.array(freqs)
 freqs/=np.sum(freqs)
+print(np.round(100*freqs,2))
 prec = scores[0,:]/100
 rec = scores[1,:]/100
-print(rec,prec)
+# print(np.(rec),prec)
 beta = 0.5
 fbeta  = lambda beta : (lambda _prec,_rec: (1+beta**2)*(_prec*_rec)/(((beta**2)*_prec) + _rec))
 wtdprec = np.matmul(freqs,prec.T)
@@ -17,6 +18,7 @@ fscores = [
     [1,1],
     [2,2]
 ]
+print(np.round(100*wtdprec,2),np.round(100*wtdrec,2))
 for i in range(len(fscores)):
     score,_ = fscores[i]
     fscores[i][1] = fbeta(score)(wtdprec,wtdrec)
