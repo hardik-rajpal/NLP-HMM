@@ -3,6 +3,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 import re
 from nltk.corpus import brown
+from gensim.test.utils import common_texts
+from gensim.models import Word2Vec
 class Tagger:
     isAmount = lambda word:(re.compile('\W[\d,.]+').match(word)!=None)
     isQualNum = lambda word:(re.compile('[\d\w,-/]*\d[\d\w,-/]*').match(word)!=None)
@@ -13,6 +15,7 @@ class Tagger:
         self.taginds = {}#dictionary mapping tags to indices in tags.
         self.init_freqs = []
         self.freqMap = {}
+        self.w2v = None
     def initializeTrellisAndEmmis(self):
         """Initializes Trellis and Emmis to arrays of appropriate dimensions.
         """
@@ -80,6 +83,7 @@ class Tagger:
         self.updateTrellisAndEmmis(mapped_sents,leastFreqWords)
         self.saveTagger()
     def testOn(self, testSents):
+        self.loadw2v()
         mapped_sents = self.get_mapped_sentences_test(testSents)
         answer = []
         for sent in mapped_sents:
@@ -106,8 +110,8 @@ class Tagger:
                         word = '$amt$'
                     if(Tagger.isQualNum(word)):
                         word = f'$qnw$'
-                    if (not self.wordinds.__contains__(word)):
-                        word = '*'
+                    # if (not self.wordinds.__contains__(word)):
+                    #     word = '*'
                     sents[i][j] = word
         return sents
     def get_mapped_sentences(self, sents):
@@ -146,7 +150,7 @@ class Tagger:
         corpus = sents
         sentences = [sent for sent in corpus]
         sentences = self.preProcSents(sentences, False)
-        mapped_sentences = [[ self.wordinds[a] for a in sent] for sent in sentences]
+        mapped_sentences = sentences# [[ self.wordinds[a] for a in sent] for sent in sentences]
         return mapped_sentences
     def saveTagger(self):
         np.save("trained/emmis", self.emmis)
@@ -165,6 +169,25 @@ class Tagger:
         self.logemissionProbs = np.log10((self.emmis * (1 / np.tile(np.sum(self.emmis, 0), (len(self.words), 1)))).T)
         self.logtransitionProbs = np.log10(self.trellis * (1 / np.tile(np.sum(self.trellis, 1).reshape((len(self.tags), 1)), (1, len(self.tags)))))
         self.loginit_probs = np.log10(self.init_freqs/ np.sum(self.init_freqs))
+    def loadw2v(self):
+        from gensim.models.keyedvectors import KeyedVectors
+        self.w2v = KeyedVectors.load_word2vec_format('w2v.bin', binary=True)
+        # self.w2v = Word2Vec.load("w2v.bin")
+    def getlogemissionProbs(self, word, logemissionProbs):
+        if not self.wordinds.__contains__(word):
+            if word not in self.w2v.wv.keys():
+                return logemissionProbs[:,self.wordinds['*']]
+            else:
+                bestsim = None
+                wordans = word
+                for wordtar in self.wordinds.keys():
+                    sim = np.linalg.norm(self.w2v.wv[wordtar] - self.w2v.wv[word])
+                    if bestsim is None or sim < bestsim:
+                        bestsim = sim
+                        wordans = wordtar
+                return logemissionProbs[:,self.wordinds[wordans]]
+        else:
+            return logemissionProbs[:,self.wordinds[word]]
     def viterbi(self, wordlist):
         states = np.arange(len(self.tags))
         wordlist = np.asarray(wordlist)
@@ -174,14 +197,14 @@ class Tagger:
         V = np.zeros((len(wordlist),len(states),2))
         V[0] = np.tile(
             (
-                (np.array([loginit_probs.flatten()+(logemissionProbs[:,wordlist[0]]).flatten()]))
+                (np.array([loginit_probs.flatten()+(self.getlogemissionProbs(wordlist[0], logemissionProbs)).flatten()]))
             ).T,
             reps=2)
         for t in range(1, len(wordlist)):
             constvt1 = np.tile(np.array([V[t-1][:,0].flatten()]).T,len(states))
             vals = constvt1+logtransitionProbs # 12x12
             stateSel = np.argmax(vals,0).flatten()
-            transProbMax = np.max(vals,0).flatten()+logemissionProbs[:,wordlist[t]].flatten()
+            transProbMax = np.max(vals,0).flatten()+(self.getlogemissionProbs(wordlist[0], logemissionProbs)).flatten()
             V[t] = np.stack([transProbMax,stateSel],1)
         maxProb = -1000
         previousState = None
@@ -254,6 +277,7 @@ class Tagger:
             res.append(acc)
             print(f'Time for iteration {i+1}: {time() - now}')
             now = time()
+            break
         np.savetxt('results/perposmetrics.csv',np.mean(allitersppos,0))
         np.savetxt('results/accuracy.csv',res)
         return res
