@@ -51,8 +51,12 @@ class Transformer:
         for x in X:
             for f, v in x.items():
                 if isinstance(v, str):
-                    feature_name = "%s%s%s" % (f, self.separator, v)
-                    v = 1
+                    if(v==self.unkmarker):
+                        indices.append(vocab[self.unkmarker])
+                        values.append(self.dtype(1))
+                    else:
+                        feature_name = "%s%s%s" % (f, self.separator, v)
+                        v = 1
                 elif isinstance(v, Number) or (v is None):
                     feature_name = f
                 if feature_name is not None:

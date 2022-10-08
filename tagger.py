@@ -4,7 +4,7 @@ from typing import List
 import matplotlib.pyplot as plt
 import numpy as np
 import re
-from keras.utils import np_utils
+from keras.utils import np_utils,plot_model
 from nltk.corpus import brown,treebank
 import torch.nn as nn 
 import torch
@@ -33,7 +33,7 @@ SEED_VALUE = 4
 np.random.seed(SEED_VALUE)
 torch.manual_seed(SEED_VALUE)
 MAXPSLENGTH = 3
-hiddenLayers = [512,512]
+hiddenLayers = [600,400]
 MAX_EPOCHS = 5
 NUMTAGS = 12
 BATCHSZ = 256
@@ -45,11 +45,12 @@ def getModel(layerszs):
         Dense(layerszs[1], input_dim=layerszs[0]),
         Activation('relu'),
         Dropout(0.2),
-        Dense(layerszs[1]),
-        Activation('relu'),
-        Dropout(0.2),
-        Dense(layerszs[-1], activation='softmax')
     ])
+    for i in range(2,len(layerszs)-1):
+        model.add(Dense(layerszs[i]))
+        model.add(Activation('relu'))
+        model.add(Dropout(0.2))
+    model.add(Dense(layerszs[-1], activation='softmax'))
     model.compile(loss='categorical_crossentropy', optimizer='adam', metrics=['accuracy'],)
     return model
 ###Fine tuning detes:
@@ -68,12 +69,6 @@ BS, layrszs => acc of saturation on train set.
 
 class Network():
     def __init__(self, lyrszs:List[int],useCEL,valX,valY):
-        #lyrszs[0] = 12 (#features)
-        #lyrszs[-1] = 12 (#tags)
-        # for i in range(1,len(lyrszs)):
-        #     self.layers.append(nn.Linear(lyrszs[i-1],lyrszs[i]))
-        #     self.layers.append(nn.ReLU())
-        # self.layers.append(nn.Softmax(1))
         modelparams = {
             'build_fn': partial(getModel,lyrszs),
             'epochs': MAX_EPOCHS,
@@ -88,16 +83,14 @@ class Network():
         np.savetxt('preds.csv',predvects.detach().numpy())
         np.savetxt('labsel.txt',labels.numpy(),fmt='%d')
         return np.round(100*(labels[torch.argmax(predvects,1)==torch.argmax(labels,1)].shape[0]/labels.shape[0]),2)
+    def plotmodel(self):
+        plot_model(self.clf.model, to_file='modelArch.png', show_shapes=True)
 class Tagger:
     isAmount = lambda word:(re.compile('\W[\d,.]+').match(word)!=None)
     isQualNum = lambda word:(re.compile('[\d\w,-/]*\d[\d\w,-/]*').match(word)!=None)
     def __init__(self):
         self.tags = []
-        self.words = []
-        self.wordinds = {}#dictionary mapping words to indices in words.#helpful for mapping plural of a word to the same index if multiplexing nns and nn
         self.taginds = {}#dictionary mapping tags to indices in tags.
-        self.init_freqs = []
-        self.freqMap = {}
         self.prefixes = np.loadtxt('prefs.txt',dtype=np.unicode_).tolist()
         self.suffixes = np.loadtxt('suffs.txt',dtype=np.unicode_).tolist()
         self.prefixes = sorted(self.prefixes,key=lambda s:-len(s))
@@ -114,7 +107,6 @@ class Tagger:
             self.prefinds[pref] = i
         for i,suff in enumerate(self.suffixes):
             self.suffinds[suff] = i
-        self.emmis = None #set pre training
         self.model = None # set to a nn.Module object after training.
         self.transformer = None # set to a Transformer after setupTransformer()
     def evalMetrics(self,preds,trueTags):
@@ -224,7 +216,8 @@ class Tagger:
             feats[f'suff-{i}'] = suffs[i]
         return feats
     def trainNetwork(self,trainX:np.ndarray,trainY:np.ndarray,valX:np.ndarray,valY:np.ndarray):
-        self.model:KerasClassifier = Network([trainX.shape[1],*hiddenLayers,trainY.shape[1]],LOSSFN=='CEL',valX,valY).clf
+        self.network = Network([trainX.shape[1],*hiddenLayers,trainY.shape[1]],LOSSFN=='CEL',valX,valY)
+        self.model:KerasClassifier = self.network.clf
         self.model.fit(trainX,trainY)
         return self.model      
     def separateWordsTags(self,mapped_sents):
@@ -245,6 +238,7 @@ class Tagger:
                 break
         tagset = list(tagset)
         tagset.append('X')
+        tagset = sorted(tagset)
         self.tags = tagset
         self.taginds.clear()
         for i,tag in enumerate(tagset):
@@ -261,7 +255,7 @@ class Tagger:
         return self.transformer
     def mapWordsToFVsTrain(self,words,isTrain=True):
         preprocwords = self.preProcSents(words,isTrain)
-        # preprocwords = words
+        preprocwords = words
         featvects = []
         for i in range(len(preprocwords)):
             featvects.append([])
@@ -273,13 +267,15 @@ class Tagger:
     def getTrainableData(self, trainSents):
         words,tags = self.separateWordsTags(trainSents)
         taginds = self.mapTagsToInds(tags)
-        featwords = self.mapWordsToFVsTrain(words)
+        featwords = self.mapWordsToFVsTrain(words,True)
         collapsed_featwords = []
         collapsed_taginds = []
         print("Mapped words and tags to features.")
         for i in range(len(featwords)):
             collapsed_featwords.extend(featwords[i])
             collapsed_taginds.extend(taginds[i])
+        _,counts = np.unique(collapsed_taginds,return_counts=True)
+        np.savetxt('trained/tagfreqs.csv',counts,fmt='%d')
         self.setupTransformer(collapsed_featwords)
         npfeats = (self.transformer.map(collapsed_featwords))
         nptags = np.array(np_utils.to_categorical(collapsed_taginds,num_classes=NUMTAGS))
@@ -314,8 +310,6 @@ class Tagger:
                     word = AMT
                 elif(Tagger.isQualNum(word)):
                     word = QNW
-                if (train==False and (not self.wordinds.__contains__(word))):
-                    word = UNKW
                 sents[i][j] = word
         return sents
     def demoSent(self,sent):
@@ -353,18 +347,22 @@ class Tagger:
             POStagger.trainOn(trainSents)
             predTags,answers = POStagger.testOn(testSentsOnlyWords)
             confmat, acc, pposa = POStagger.evalMetrics(predTags,testSentsOnlyTags)
+            pposa*=100
             allitersppos.append(pposa)
-            np.savetxt(f'results/pposa_{i+1}.csv',pposa,delimiter=', ')
+            np.savetxt(f'results/pposa_{i+1}.csv',pposa,delimiter=', ',fmt='%.2f')
+            np.savetxt(f'results/confmat_{i+1}.csv',confmat,fmt='%.2f')
             plt.imshow(confmat,cmap='hot',interpolation='nearest')
             plt.xticks(np.arange(NUMTAGS),labels=POStagger.tags,fontsize=8)
             plt.yticks(np.arange(NUMTAGS),labels=POStagger.tags,fontsize=8)
+            plt.text(4,-1,f'Range:({np.round(np.min(confmat),2)},{np.round(np.max(confmat),2)})')
             plt.savefig(f'results/confmat_{i+1}.png')
             res.append(acc)
             print(f'Time for iteration {i+1}: {time() - now}')
             now = time()
             break
-        np.savetxt('results/perposmetrics.csv',np.mean(allitersppos,0))
-        np.savetxt('results/accuracy.csv',res)
+        POStagger.network.plotmodel()
+        np.savetxt('results/perposmetrics.csv',np.mean(allitersppos,0),fmt='%.2f')
+        np.savetxt('results/accuracy.csv',100*np.array(res),fmt='%.2f')
         return res
     def getTrainedTagger():
         t = Tagger()
